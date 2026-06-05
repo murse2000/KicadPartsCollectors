@@ -40,7 +40,143 @@ except ImportError:
 
 
 AVAILABLE_THEMES = ("flatly", "cosmo", "litera", "minty", "pulse", "darkly", "superhero", "cyborg", "solar")
-DARK_THEMES = {"darkly", "superhero", "cyborg", "solar"}
+THEME_PALETTES = {
+    "flatly": {
+        "page_bg": "#f4f7fb",
+        "card_bg": "#ffffff",
+        "soft_bg": "#eef6ff",
+        "heading_bg": "#eef3fb",
+        "text": "#172033",
+        "muted": "#657084",
+        "field": "#273247",
+        "primary": "#2563eb",
+        "primary_active": "#1d4ed8",
+        "secondary": "#eef3fb",
+        "secondary_active": "#e2eaf6",
+        "selection": "#dbeafe",
+        "entry_bg": "#ffffff",
+    },
+    "cosmo": {
+        "page_bg": "#f5f7fb",
+        "card_bg": "#ffffff",
+        "soft_bg": "#edf4ff",
+        "heading_bg": "#e8edf7",
+        "text": "#1f2937",
+        "muted": "#64748b",
+        "field": "#263244",
+        "primary": "#2780e3",
+        "primary_active": "#1f6fc8",
+        "secondary": "#edf2f7",
+        "secondary_active": "#dde7f0",
+        "selection": "#d7e9ff",
+        "entry_bg": "#ffffff",
+    },
+    "litera": {
+        "page_bg": "#f7f5f2",
+        "card_bg": "#ffffff",
+        "soft_bg": "#fff1f0",
+        "heading_bg": "#f1ebe5",
+        "text": "#2f2a26",
+        "muted": "#756b63",
+        "field": "#423833",
+        "primary": "#d9534f",
+        "primary_active": "#c64541",
+        "secondary": "#eee8e2",
+        "secondary_active": "#e4dbd2",
+        "selection": "#ffd9d7",
+        "entry_bg": "#ffffff",
+    },
+    "minty": {
+        "page_bg": "#f1faf7",
+        "card_bg": "#ffffff",
+        "soft_bg": "#e4f8f1",
+        "heading_bg": "#dff3ec",
+        "text": "#14332b",
+        "muted": "#527067",
+        "field": "#1f4a40",
+        "primary": "#20c997",
+        "primary_active": "#16a67d",
+        "secondary": "#e6f3ef",
+        "secondary_active": "#d5e9e3",
+        "selection": "#c6f2e4",
+        "entry_bg": "#ffffff",
+    },
+    "pulse": {
+        "page_bg": "#f8f5fb",
+        "card_bg": "#ffffff",
+        "soft_bg": "#f2e9fb",
+        "heading_bg": "#eadff5",
+        "text": "#2f243a",
+        "muted": "#736280",
+        "field": "#4a365b",
+        "primary": "#593196",
+        "primary_active": "#4b2a80",
+        "secondary": "#efe7f6",
+        "secondary_active": "#e2d6ee",
+        "selection": "#dfccf4",
+        "entry_bg": "#ffffff",
+    },
+    "darkly": {
+        "page_bg": "#111827",
+        "card_bg": "#1f2937",
+        "soft_bg": "#263447",
+        "heading_bg": "#303b4d",
+        "text": "#f8fafc",
+        "muted": "#b7c3d3",
+        "field": "#dbeafe",
+        "primary": "#38bdf8",
+        "primary_active": "#0ea5e9",
+        "secondary": "#334155",
+        "secondary_active": "#475569",
+        "selection": "#0f766e",
+        "entry_bg": "#111827",
+    },
+    "superhero": {
+        "page_bg": "#18202b",
+        "card_bg": "#243242",
+        "soft_bg": "#20384d",
+        "heading_bg": "#31475e",
+        "text": "#f3f7fb",
+        "muted": "#b8c5d1",
+        "field": "#e4eef8",
+        "primary": "#df691a",
+        "primary_active": "#c75c16",
+        "secondary": "#3a4e63",
+        "secondary_active": "#4a6178",
+        "selection": "#4f6f8f",
+        "entry_bg": "#17212c",
+    },
+    "cyborg": {
+        "page_bg": "#060b10",
+        "card_bg": "#111820",
+        "soft_bg": "#10212a",
+        "heading_bg": "#182733",
+        "text": "#f7fbff",
+        "muted": "#9fb4c8",
+        "field": "#dffaff",
+        "primary": "#2a9fd6",
+        "primary_active": "#2088ba",
+        "secondary": "#202f3a",
+        "secondary_active": "#2d4050",
+        "selection": "#155e75",
+        "entry_bg": "#050a0f",
+    },
+    "solar": {
+        "page_bg": "#1f2326",
+        "card_bg": "#2b3035",
+        "soft_bg": "#383733",
+        "heading_bg": "#3a4247",
+        "text": "#f6f0df",
+        "muted": "#c6bfae",
+        "field": "#fff4ce",
+        "primary": "#b58900",
+        "primary_active": "#9c7600",
+        "secondary": "#3b4348",
+        "secondary_active": "#4b545a",
+        "selection": "#6b5a22",
+        "entry_bg": "#202529",
+    },
+}
 
 
 def dropped_zip_paths(paths) -> list[str]:
@@ -118,23 +254,25 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         style = ttk.Style(self)
         if not tb:
             style.theme_use("clam")
-        dark = self.theme_name.get() in DARK_THEMES
-        page_bg = "#111827" if dark else "#f4f7fb"
-        card_bg = "#1f2937" if dark else "#ffffff"
-        soft_bg = "#263447" if dark else "#eef6ff"
-        heading_bg = "#303b4d" if dark else "#eef3fb"
-        text = "#f8fafc" if dark else "#172033"
-        muted = "#b7c3d3" if dark else "#657084"
-        field = "#dbeafe" if dark else "#273247"
-        primary = "#38bdf8" if dark else "#2563eb"
-        primary_active = "#0ea5e9" if dark else "#1d4ed8"
-        secondary = "#334155" if dark else "#eef3fb"
-        secondary_active = "#475569" if dark else "#e2eaf6"
-        selection = "#0f766e" if dark else "#dbeafe"
-        entry_bg = "#111827" if dark else "#ffffff"
+        palette = THEME_PALETTES.get(self.theme_name.get(), THEME_PALETTES["flatly"])
+        page_bg = palette["page_bg"]
+        card_bg = palette["card_bg"]
+        soft_bg = palette["soft_bg"]
+        heading_bg = palette["heading_bg"]
+        text = palette["text"]
+        muted = palette["muted"]
+        field = palette["field"]
+        primary = palette["primary"]
+        primary_active = palette["primary_active"]
+        secondary = palette["secondary"]
+        secondary_active = palette["secondary_active"]
+        selection = palette["selection"]
+        entry_bg = palette["entry_bg"]
 
         self.configure(bg=page_bg)
         style.configure(".", font=("Malgun Gothic", 10), background=page_bg, foreground=text)
+        style.configure("TFrame", background=page_bg)
+        style.configure("TLabel", background=page_bg, foreground=text)
         style.configure("Title.TLabel", font=("Malgun Gothic", 14, "bold"), background=page_bg, foreground=text)
         style.configure("Muted.TLabel", background=page_bg, foreground=muted)
         style.configure("Card.TFrame", background=card_bg, relief=tk.FLAT)
@@ -558,9 +696,10 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             return
 
         if tb:
-            ttk.Style(self).theme_use(theme)
+            self.style.theme_use(theme)
         self._configure_style()
         self._save_current_settings()
+        self.update_idletasks()
 
     def _save_current_settings(self) -> None:
         save_settings(AppSettings(library_root=self.library_root.get().strip(), theme=self.theme_name.get()))
