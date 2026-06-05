@@ -296,6 +296,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self._configure_style()
         self._build_menu()
         self._build_ui()
+        self._apply_theme(initial_theme, save=False)
         self._register_drop_targets()
         self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
         self.bind("<Unmap>", self._on_unmap)
@@ -364,13 +365,13 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         style.configure("Title.TLabel", font=("Malgun Gothic", 14, "bold"), background=page_bg, foreground=text)
         style.configure("Muted.TLabel", background=page_bg, foreground=muted)
         style.configure("Card.TFrame", background=card_bg, relief=tk.FLAT)
-        style.configure("Toolbar.TFrame", background=card_bg, relief=tk.FLAT)
+        style.configure("Toolbar.TFrame", background=page_bg, relief=tk.FLAT)
         style.configure("Status.TFrame", background=heading_bg, relief=tk.FLAT, borderwidth=1)
         style.configure("Drop.TFrame", background=soft_bg, relief=tk.FLAT)
         style.configure("CardTitle.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=muted)
         style.configure("Count.TLabel", font=("Malgun Gothic", 11, "bold"), background=card_bg, foreground=text)
         style.configure("Field.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=field)
-        style.configure("Toolbar.TLabel", font=("Malgun Gothic", 9, "bold"), background=card_bg, foreground=muted)
+        style.configure("Toolbar.TLabel", font=("Malgun Gothic", 9, "bold"), background=page_bg, foreground=muted)
         style.configure("Status.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=muted)
         style.configure("StatusCell.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=text, relief=tk.SUNKEN, padding=(8, 2))
         style.configure("DropTitle.TLabel", font=("Malgun Gothic", 12, "bold"), background=soft_bg, foreground=primary)
@@ -1020,10 +1021,15 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         if theme not in AVAILABLE_THEMES:
             return
 
+        self._apply_theme(theme, save=True)
+
+    def _apply_theme(self, theme: str, save: bool) -> None:
         if tb:
             self.style.theme_use(theme)
+        self.theme_name.set(theme)
         self._configure_style()
-        self._save_current_settings()
+        if save:
+            self._save_current_settings()
         self.update_idletasks()
 
     def _save_current_settings(self) -> None:
