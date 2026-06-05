@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,7 +71,9 @@ def fetch_latest_release() -> ReleaseInfo:
 
 
 def download_release_asset(asset: ReleaseAsset) -> Path:
-    target = Path(tempfile.gettempdir()) / RELEASE_ASSET_NAME
+    target_dir = Path(tempfile.gettempdir()) / f"KiCadPartsCollector_update_{uuid.uuid4().hex}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / RELEASE_ASSET_NAME
     request = urllib.request.Request(asset.url, headers={"User-Agent": "KiCadPartsCollector"})
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
@@ -87,6 +90,7 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
         raise UpdateError("자동 교체 업데이트는 Windows 실행파일에서만 지원합니다.")
 
     script = Path(tempfile.gettempdir()) / "KiCadPartsCollector_update.cmd"
+    app_dir = current_exe.parent
     script.write_text(
         "\n".join(
             [
@@ -94,19 +98,24 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
                 "setlocal",
                 f'set "SRC={downloaded_exe}"',
                 f'set "DST={current_exe}"',
+                f'set "APPDIR={app_dir}"',
                 ":wait",
                 "timeout /t 1 /nobreak >nul",
                 'copy /Y "%SRC%" "%DST%" >nul',
                 "if errorlevel 1 goto wait",
-                'start "" "%DST%"',
-                'del "%SRC%" >nul 2>nul',
-                'del "%~f0" >nul 2>nul',
+                "timeout /t 2 /nobreak >nul",
+                'start "" /D "%APPDIR%" "%DST%"',
+                "endlocal",
             ]
         ),
         encoding="utf-8",
         newline="\r\n",
     )
-    subprocess.Popen(["cmd", "/c", "start", "", str(script)], shell=False)
+    subprocess.Popen(
+        ["cmd.exe", "/c", str(script)],
+        cwd=app_dir,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
 
 def _release_asset(assets: list[dict]) -> ReleaseAsset | None:
