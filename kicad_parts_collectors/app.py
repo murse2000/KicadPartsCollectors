@@ -39,6 +39,10 @@ except ImportError:
     pystray = None
 
 
+AVAILABLE_THEMES = ("flatly", "cosmo", "litera", "minty", "pulse", "darkly", "superhero", "cyborg", "solar")
+DARK_THEMES = {"darkly", "superhero", "cyborg", "solar"}
+
+
 def dropped_zip_paths(paths) -> list[str]:
     return [str(path) for path in paths if Path(path).suffix.lower() == ".zip"]
 
@@ -63,18 +67,20 @@ def _safe_autostart_enabled() -> bool:
 
 class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
     def __init__(self) -> None:
+        app_settings = load_settings()
+        initial_theme = app_settings.theme if app_settings.theme in AVAILABLE_THEMES else "flatly"
         if tb:
-            super().__init__(themename="flatly")
+            super().__init__(themename=initial_theme)
         else:
             super().__init__()
         self.title("KiCad Parts Collector")
         self.geometry("1180x760")
         self.minsize(1040, 640)
-        self.configure(bg="#f4f7fb")
 
-        self.app_settings = load_settings()
+        self.app_settings = app_settings
         self.zip_path = tk.StringVar()
         self.library_root = tk.StringVar(value=self.app_settings.library_root)
+        self.theme_name = tk.StringVar(value=initial_theme)
         self.status = tk.StringVar(value="ZIP 파일과 사내 라이브러리 위치를 선택하세요.")
         self.symbol_count = tk.StringVar(value="0")
         self.footprint_count = tk.StringVar(value="0")
@@ -112,24 +118,40 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         style = ttk.Style(self)
         if not tb:
             style.theme_use("clam")
-        style.configure(".", font=("Malgun Gothic", 10), background="#f4f7fb", foreground="#172033")
-        style.configure("Title.TLabel", font=("Malgun Gothic", 14, "bold"), background="#f4f7fb", foreground="#172033")
-        style.configure("Muted.TLabel", background="#f4f7fb", foreground="#657084")
-        style.configure("Card.TFrame", background="#ffffff", relief=tk.FLAT)
-        style.configure("Drop.TFrame", background="#eef6ff", relief=tk.FLAT)
-        style.configure("CardTitle.TLabel", font=("Malgun Gothic", 10, "bold"), background="#ffffff", foreground="#657084")
-        style.configure("Count.TLabel", font=("Malgun Gothic", 11, "bold"), background="#ffffff", foreground="#172033")
-        style.configure("Field.TLabel", font=("Malgun Gothic", 10, "bold"), background="#ffffff", foreground="#273247")
-        style.configure("DropTitle.TLabel", font=("Malgun Gothic", 12, "bold"), background="#eef6ff", foreground="#1d4ed8")
-        style.configure("DropText.TLabel", background="#eef6ff", foreground="#3b4a63")
-        style.configure("TEntry", fieldbackground="#ffffff", bordercolor="#d8e0ed", lightcolor="#d8e0ed", darkcolor="#d8e0ed")
-        style.configure("Primary.TButton", font=("Malgun Gothic", 10, "bold"), foreground="#ffffff", background="#2563eb")
-        style.map("Primary.TButton", background=[("active", "#1d4ed8"), ("disabled", "#9bb7f4")])
-        style.configure("Secondary.TButton", foreground="#172033", background="#eef3fb")
-        style.map("Secondary.TButton", background=[("active", "#e2eaf6"), ("disabled", "#f2f4f8")])
-        style.configure("Treeview", rowheight=24, fieldbackground="#ffffff", background="#ffffff", foreground="#172033")
-        style.configure("Treeview.Heading", font=("Malgun Gothic", 10, "bold"), background="#eef3fb", foreground="#273247")
-        style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", "#172033")])
+        dark = self.theme_name.get() in DARK_THEMES
+        page_bg = "#111827" if dark else "#f4f7fb"
+        card_bg = "#1f2937" if dark else "#ffffff"
+        soft_bg = "#263447" if dark else "#eef6ff"
+        heading_bg = "#303b4d" if dark else "#eef3fb"
+        text = "#f8fafc" if dark else "#172033"
+        muted = "#b7c3d3" if dark else "#657084"
+        field = "#dbeafe" if dark else "#273247"
+        primary = "#38bdf8" if dark else "#2563eb"
+        primary_active = "#0ea5e9" if dark else "#1d4ed8"
+        secondary = "#334155" if dark else "#eef3fb"
+        secondary_active = "#475569" if dark else "#e2eaf6"
+        selection = "#0f766e" if dark else "#dbeafe"
+        entry_bg = "#111827" if dark else "#ffffff"
+
+        self.configure(bg=page_bg)
+        style.configure(".", font=("Malgun Gothic", 10), background=page_bg, foreground=text)
+        style.configure("Title.TLabel", font=("Malgun Gothic", 14, "bold"), background=page_bg, foreground=text)
+        style.configure("Muted.TLabel", background=page_bg, foreground=muted)
+        style.configure("Card.TFrame", background=card_bg, relief=tk.FLAT)
+        style.configure("Drop.TFrame", background=soft_bg, relief=tk.FLAT)
+        style.configure("CardTitle.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=muted)
+        style.configure("Count.TLabel", font=("Malgun Gothic", 11, "bold"), background=card_bg, foreground=text)
+        style.configure("Field.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=field)
+        style.configure("DropTitle.TLabel", font=("Malgun Gothic", 12, "bold"), background=soft_bg, foreground=primary)
+        style.configure("DropText.TLabel", background=soft_bg, foreground=muted)
+        style.configure("TEntry", fieldbackground=entry_bg, foreground=text, bordercolor=heading_bg, lightcolor=heading_bg, darkcolor=heading_bg)
+        style.configure("Primary.TButton", font=("Malgun Gothic", 10, "bold"), foreground="#ffffff", background=primary)
+        style.map("Primary.TButton", background=[("active", primary_active), ("disabled", "#64748b")])
+        style.configure("Secondary.TButton", foreground=text, background=secondary)
+        style.map("Secondary.TButton", background=[("active", secondary_active), ("disabled", secondary)])
+        style.configure("Treeview", rowheight=24, fieldbackground=card_bg, background=card_bg, foreground=text)
+        style.configure("Treeview.Heading", font=("Malgun Gothic", 10, "bold"), background=heading_bg, foreground=field)
+        style.map("Treeview", background=[("selected", selection)], foreground=[("selected", text)])
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=14)
@@ -149,6 +171,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             text="심볼은 단일 라이브러리 파일에 병합하고, 풋프린트는 단일 .pretty 폴더에 추가합니다.",
             style="Muted.TLabel",
         ).grid(row=0, column=1, sticky="e")
+        skin_bar = ttk.Frame(header)
+        skin_bar.grid(row=1, column=1, sticky="e", pady=(6, 0))
+        ttk.Label(skin_bar, text="스킨", style="Muted.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.theme_combo = ttk.Combobox(skin_bar, textvariable=self.theme_name, values=AVAILABLE_THEMES, state="readonly", width=12)
+        self.theme_combo.pack(side=tk.LEFT)
+        self.theme_combo.bind("<<ComboboxSelected>>", self._change_theme)
 
         form = ttk.Frame(root, style="Card.TFrame", padding=10)
         form.grid(row=1, column=0, sticky="ew")
@@ -524,8 +552,18 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.status.set(f"삭제 완료: 심볼 {result.symbols}개, 풋프린트 {result.footprints}개, 3D 모델 {result.models}개")
         self._refresh_library_view()
 
+    def _change_theme(self, _event=None) -> None:
+        theme = self.theme_name.get()
+        if theme not in AVAILABLE_THEMES:
+            return
+
+        if tb:
+            ttk.Style(self).theme_use(theme)
+        self._configure_style()
+        self._save_current_settings()
+
     def _save_current_settings(self) -> None:
-        save_settings(AppSettings(library_root=self.library_root.get().strip()))
+        save_settings(AppSettings(library_root=self.library_root.get().strip(), theme=self.theme_name.get()))
 
     def _set_busy(self, busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
@@ -539,6 +577,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.watch_button.configure(state=state)
         self.refresh_button.configure(state=state)
         self.delete_button.configure(state=state)
+        self.theme_combo.configure(state="disabled" if busy else "readonly")
 
     def _on_unmap(self, _event) -> None:
         if self.state() == "iconic" and not self.quitting:

@@ -12,10 +12,11 @@ class SettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "settings.json"
 
-            save_settings(AppSettings(library_root="C:/Work/099. Etc/test"), path)
+            save_settings(AppSettings(library_root="C:/Work/099. Etc/test", theme="darkly"), path)
             settings = load_settings(path)
 
             self.assertEqual("C:/Work/099. Etc/test", settings.library_root)
+            self.assertEqual("darkly", settings.theme)
 
     def test_invalid_settings_file_returns_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -25,6 +26,7 @@ class SettingsTests(unittest.TestCase):
             settings = load_settings(path)
 
             self.assertEqual("", settings.library_root)
+            self.assertEqual("flatly", settings.theme)
 
 
 if __name__ == "__main__":
