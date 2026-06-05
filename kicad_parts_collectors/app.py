@@ -292,6 +292,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.tray_icon = None
         self.tray_hidden = False
         self.quitting = False
+        self.library_resize_job = None
 
         self._set_window_icon()
         self.dnd_enabled = self._enable_drag_and_drop()
@@ -509,6 +510,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.library_table.column("fp_ok", width=42, minwidth=42, anchor=tk.CENTER, stretch=False)
         self.library_table.column("model_ok", width=42, minwidth=42, anchor=tk.CENTER, stretch=False)
         self.library_table.grid(row=1, column=0, sticky="nsew")
+        self.library_table.bind("<Configure>", self._schedule_library_column_fit)
         self.library_table.bind("<<TreeviewSelect>>", self._show_selected_library_entry)
         library_scroll = ttk.Scrollbar(library_card, orient=tk.VERTICAL, command=self.library_table.yview)
         library_scroll.grid(row=1, column=1, sticky="ns")
@@ -965,6 +967,31 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             )
 
         self.library_status.set(f"라이브러리 상태: {len(entries)}개 / 문제 {broken}개")
+        self._schedule_library_column_fit()
+
+    def _schedule_library_column_fit(self, _event=None) -> None:
+        if self.library_resize_job is not None:
+            self.after_cancel(self.library_resize_job)
+        self.library_resize_job = self.after_idle(self._fit_library_columns)
+
+    def _fit_library_columns(self) -> None:
+        self.library_resize_job = None
+        width = self.library_table.winfo_width()
+        if width <= 1:
+            self.library_resize_job = self.after(50, self._fit_library_columns)
+            return
+
+        status_width = 42
+        available = max(width - (status_width * 2) - 8, 240)
+        symbol_width = max(72, min(118, available // 4))
+        value_width = max(72, min(118, available // 4))
+        footprint_width = max(96, available - symbol_width - value_width)
+
+        self.library_table.column("symbol", width=symbol_width, anchor=tk.W, stretch=False)
+        self.library_table.column("value", width=value_width, anchor=tk.W, stretch=False)
+        self.library_table.column("footprint", width=footprint_width, anchor=tk.W, stretch=False)
+        self.library_table.column("fp_ok", width=status_width, anchor=tk.CENTER, stretch=False)
+        self.library_table.column("model_ok", width=status_width, anchor=tk.CENTER, stretch=False)
 
     def _show_selected_library_entry(self, _event=None) -> None:
         selected = self.library_table.selection()
