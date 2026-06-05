@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -99,6 +100,7 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
                 f'set "SRC={downloaded_exe}"',
                 f'set "DST={current_exe}"',
                 f'set "APPDIR={app_dir}"',
+                'set "PYINSTALLER_RESET_ENVIRONMENT=1"',
                 ":wait",
                 "timeout /t 1 /nobreak >nul",
                 'copy /Y "%SRC%" "%DST%" >nul',
@@ -111,10 +113,13 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
         encoding="utf-8",
         newline="\r\n",
     )
+    env = os.environ.copy()
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     subprocess.Popen(
         ["cmd.exe", "/c", str(script)],
         cwd=app_dir,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        env=env,
     )
 
 
