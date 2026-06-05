@@ -236,6 +236,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.library_status = tk.StringVar(value="라이브러리 상태: -")
         self.batch_directory = tk.StringVar()
         self.watch_status = tk.StringVar(value="감시 중지")
+        self.autostart_enabled = tk.BooleanVar(value=_safe_autostart_enabled())
         self.watch_enabled = False
         self.watch_folders = ensure_watch_folders()
         self.tray_icon = None
@@ -245,6 +246,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self._set_window_icon()
         self.dnd_enabled = self._enable_drag_and_drop()
         self._configure_style()
+        self._build_menu()
         self._build_ui()
         self._register_drop_targets()
         self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
@@ -321,6 +323,54 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         style.configure("Treeview.Heading", font=("Malgun Gothic", 10, "bold"), background=heading_bg, foreground=field)
         style.map("Treeview", background=[("selected", selection)], foreground=[("selected", text)])
 
+    def _build_menu(self) -> None:
+        menu_bar = tk.Menu(self)
+
+        file_menu = tk.Menu(menu_bar, tearoff=0)
+        file_menu.add_command(label="ZIP 파일 선택", command=self._choose_zip)
+        file_menu.add_command(label="미리보기", command=self._preview)
+        file_menu.add_command(label="라이브러리에 추가", command=self._install)
+        file_menu.add_separator()
+        file_menu.add_command(label="폴더 일괄 추가", command=self._choose_and_install_directory)
+        file_menu.add_separator()
+        file_menu.add_command(label="종료", command=self._quit_app)
+        menu_bar.add_cascade(label="파일", menu=file_menu)
+
+        library_menu = tk.Menu(menu_bar, tearoff=0)
+        library_menu.add_command(label="라이브러리 위치 선택", command=self._choose_library_root)
+        library_menu.add_command(label="라이브러리 상태 새로고침", command=self._refresh_library_view)
+        library_menu.add_command(label="선택 항목 삭제", command=self._delete_selected_library_entries)
+        menu_bar.add_cascade(label="라이브러리", menu=library_menu)
+
+        self.watch_menu = tk.Menu(menu_bar, tearoff=0)
+        self.watch_menu.add_command(label="감시 시작", command=self._toggle_watch)
+        self.watch_menu.add_separator()
+        self.watch_menu.add_command(label=f"수신 폴더: {self.watch_folders.incoming}", state=tk.DISABLED)
+        self.watch_menu.add_command(label=f"백업 폴더: {self.watch_folders.processed}", state=tk.DISABLED)
+        menu_bar.add_cascade(label="감시", menu=self.watch_menu)
+
+        settings_menu = tk.Menu(menu_bar, tearoff=0)
+        theme_menu = tk.Menu(settings_menu, tearoff=0)
+        for theme in AVAILABLE_THEMES:
+            theme_menu.add_radiobutton(
+                label=theme,
+                value=theme,
+                variable=self.theme_name,
+                command=self._change_theme,
+            )
+        settings_menu.add_cascade(label="스킨", menu=theme_menu)
+        settings_menu.add_separator()
+        settings_menu.add_checkbutton(
+            label="윈도우 시작 시 자동 실행",
+            variable=self.autostart_enabled,
+            command=self._toggle_autostart_from_menu,
+            onvalue=True,
+            offvalue=False,
+        )
+        menu_bar.add_cascade(label="설정", menu=settings_menu)
+
+        self.config(menu=menu_bar)
+
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=14)
         self.root_frame = root
@@ -338,41 +388,44 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             header,
             text="심볼은 단일 라이브러리 파일에 병합하고, 풋프린트는 단일 .pretty 폴더에 추가합니다.",
             style="Muted.TLabel",
-        ).grid(row=0, column=1, sticky="e")
-        skin_bar = ttk.Frame(header)
-        skin_bar.grid(row=1, column=1, sticky="e", pady=(6, 0))
-        ttk.Label(skin_bar, text="스킨", style="Muted.TLabel").pack(side=tk.LEFT, padx=(0, 6))
-        self.theme_combo = ttk.Combobox(skin_bar, textvariable=self.theme_name, values=AVAILABLE_THEMES, state="readonly", width=12)
-        self.theme_combo.pack(side=tk.LEFT)
-        self.theme_combo.bind("<<ComboboxSelected>>", self._change_theme)
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        form = ttk.Frame(root, style="Card.TFrame", padding=10)
+        form = ttk.Frame(root, style="Card.TFrame", padding=14)
         form.grid(row=1, column=0, sticky="ew")
+        form.columnconfigure(0, weight=3)
         form.columnconfigure(1, weight=3)
-        form.columnconfigure(4, weight=2)
+        form.columnconfigure(2, weight=0)
 
-        ttk.Label(form, text="ZIP", style="Field.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self.zip_entry = ttk.Entry(form, textvariable=self.zip_path)
-        self.zip_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8), ipady=4)
-        self.zip_button = ttk.Button(form, text="찾기", style="Secondary.TButton", command=self._choose_zip)
-        self.zip_button.grid(row=0, column=2, padx=(0, 12), ipadx=8)
+        zip_group = ttk.Frame(form, style="Card.TFrame")
+        zip_group.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        zip_group.columnconfigure(0, weight=1)
+        ttk.Label(zip_group, text="ZIP 파일", style="Field.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        zip_row = ttk.Frame(zip_group, style="Card.TFrame")
+        zip_row.grid(row=1, column=0, sticky="ew")
+        zip_row.columnconfigure(0, weight=1)
+        self.zip_entry = ttk.Entry(zip_row, textvariable=self.zip_path)
+        self.zip_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8), ipady=5)
+        self.zip_button = ttk.Button(zip_row, text="찾기", style="Secondary.TButton", command=self._choose_zip)
+        self.zip_button.grid(row=0, column=1, ipadx=8)
 
-        ttk.Label(form, text="라이브러리", style="Field.TLabel").grid(row=0, column=3, sticky="w", padx=(0, 8))
-        self.library_entry = ttk.Entry(form, textvariable=self.library_root)
-        self.library_entry.grid(row=0, column=4, sticky="ew", padx=(0, 8), ipady=4)
-        self.library_button = ttk.Button(form, text="찾기", style="Secondary.TButton", command=self._choose_library_root)
-        self.library_button.grid(row=0, column=5, padx=(0, 8), ipadx=8)
+        library_group = ttk.Frame(form, style="Card.TFrame")
+        library_group.grid(row=0, column=1, sticky="ew", padx=(0, 12))
+        library_group.columnconfigure(0, weight=1)
+        ttk.Label(library_group, text="라이브러리 위치", style="Field.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        library_row = ttk.Frame(library_group, style="Card.TFrame")
+        library_row.grid(row=1, column=0, sticky="ew")
+        library_row.columnconfigure(0, weight=1)
+        self.library_entry = ttk.Entry(library_row, textvariable=self.library_root)
+        self.library_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8), ipady=5)
+        self.library_button = ttk.Button(library_row, text="찾기", style="Secondary.TButton", command=self._choose_library_root)
+        self.library_button.grid(row=0, column=1, ipadx=8)
 
         actions = ttk.Frame(form, style="Card.TFrame")
-        actions.grid(row=0, column=6, sticky="e")
+        actions.grid(row=0, column=2, sticky="sew")
         self.preview_button = ttk.Button(actions, text="미리보기", style="Secondary.TButton", command=self._preview)
-        self.preview_button.pack(side=tk.LEFT, ipadx=8)
+        self.preview_button.pack(side=tk.LEFT, ipadx=10)
         self.install_button = ttk.Button(actions, text="라이브러리에 추가", style="Primary.TButton", command=self._install)
-        self.install_button.pack(side=tk.LEFT, padx=(6, 0), ipadx=8)
-        self.batch_button = ttk.Button(actions, text="폴더 일괄 추가", style="Secondary.TButton", command=self._choose_and_install_directory)
-        self.batch_button.pack(side=tk.LEFT, padx=(6, 0), ipadx=8)
-        self.watch_button = ttk.Button(actions, text="감시 시작", style="Secondary.TButton", command=self._toggle_watch)
-        self.watch_button.pack(side=tk.LEFT, padx=(6, 0), ipadx=8)
+        self.install_button.pack(side=tk.LEFT, padx=(8, 0), ipadx=10)
 
         content = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         content.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
@@ -544,7 +597,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
     def _toggle_watch(self) -> None:
         if self.watch_enabled:
             self.watch_enabled = False
-            self.watch_button.configure(text="감시 시작")
+            self._set_watch_menu_label()
             self.watch_status.set("감시 중지")
             return
 
@@ -559,9 +612,14 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
 
         self._save_current_settings()
         self.watch_enabled = True
-        self.watch_button.configure(text="감시 중지")
+        self._set_watch_menu_label()
         self.watch_status.set(f"감시 중: {self.watch_folders.incoming}")
         self._poll_watch_folder()
+
+    def _set_watch_menu_label(self) -> None:
+        if hasattr(self, "watch_menu"):
+            label = "감시 중지" if self.watch_enabled else "감시 시작"
+            self.watch_menu.entryconfigure(0, label=label)
 
     def _toggle_watch_from_tray(self) -> None:
         self.after(0, self._toggle_watch)
@@ -569,10 +627,19 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
     def _toggle_autostart_from_tray(self) -> None:
         def toggle() -> None:
             try:
-                set_autostart_enabled(not is_autostart_enabled())
+                enabled = not is_autostart_enabled()
+                set_autostart_enabled(enabled)
+                self.autostart_enabled.set(enabled)
             except AutostartError as exc:
                 messagebox.showerror("자동 실행 설정 실패", str(exc))
         self.after(0, toggle)
+
+    def _toggle_autostart_from_menu(self) -> None:
+        try:
+            set_autostart_enabled(self.autostart_enabled.get())
+        except AutostartError as exc:
+            self.autostart_enabled.set(_safe_autostart_enabled())
+            messagebox.showerror("자동 실행 설정 실패", str(exc))
 
     def _poll_watch_folder(self) -> None:
         if not self.watch_enabled:
@@ -585,7 +652,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
                 self._show_batch_results(results)
                 self._notify("KiCad Parts Collector", f"자동 추가 완료: {len(results)}개 ZIP 처리")
                 self.watch_enabled = True
-                self.watch_button.configure(text="감시 중지")
+                self._set_watch_menu_label()
                 self.watch_status.set(f"감시 중: {self.watch_folders.incoming}")
 
         self.after(2000, self._poll_watch_folder)
@@ -742,11 +809,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.library_button.configure(state=state)
         self.preview_button.configure(state=state)
         self.install_button.configure(state=state)
-        self.batch_button.configure(state=state)
-        self.watch_button.configure(state=state)
         self.refresh_button.configure(state=state)
         self.delete_button.configure(state=state)
-        self.theme_combo.configure(state="disabled" if busy else "readonly")
 
     def _on_unmap(self, _event) -> None:
         if self.state() == "iconic" and not self.quitting:
