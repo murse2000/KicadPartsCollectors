@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('assets/app_icon.png', 'assets'), ('assets/app_icon.ico', 'assets')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('tkinterdnd2')
@@ -46,4 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/app_icon.ico',
 )

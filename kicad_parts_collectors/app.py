@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+import sys
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -183,7 +184,18 @@ def dropped_zip_paths(paths) -> list[str]:
     return [str(path) for path in paths if Path(path).suffix.lower() == ".zip"]
 
 
+def _resource_path(relative_path: str) -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / relative_path
+
+    return Path(__file__).resolve().parent.parent / relative_path
+
+
 def _tray_image() -> Image.Image:
+    icon_path = _resource_path("assets/app_icon.png")
+    if icon_path.exists():
+        return Image.open(icon_path).convert("RGBA")
+
     image = Image.new("RGBA", (64, 64), "#1f3349")
     draw = ImageDraw.Draw(image)
     colors = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6"]
@@ -230,6 +242,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.tray_hidden = False
         self.quitting = False
 
+        self._set_window_icon()
         self.dnd_enabled = self._enable_drag_and_drop()
         self._configure_style()
         self._build_ui()
@@ -249,6 +262,23 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             return False
 
         return True
+
+    def _set_window_icon(self) -> None:
+        icon_path = _resource_path("assets/app_icon.ico")
+        png_path = _resource_path("assets/app_icon.png")
+
+        if icon_path.exists():
+            try:
+                self.iconbitmap(default=str(icon_path))
+            except tk.TclError:
+                pass
+
+        if png_path.exists():
+            try:
+                self.window_icon_image = tk.PhotoImage(file=str(png_path))
+                self.iconphoto(True, self.window_icon_image)
+            except tk.TclError:
+                pass
 
     def _configure_style(self) -> None:
         style = ttk.Style(self)
