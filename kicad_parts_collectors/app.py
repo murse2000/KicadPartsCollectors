@@ -610,14 +610,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         status_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         status_bar.columnconfigure(0, weight=3)
         status_bar.columnconfigure(1, weight=1)
-        status_bar.columnconfigure(2, weight=2)
-        status_bar.columnconfigure(3, weight=2)
         ttk.Label(status_bar, textvariable=self.status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=0, sticky="ew")
         ttk.Label(status_bar, textvariable=self.watch_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=1, sticky="ew")
-        self.incoming_status = tk.StringVar(value=f"수신 {self.watch_folders.incoming}")
-        self.processed_status = tk.StringVar(value=f"백업 {self.watch_folders.processed}")
-        ttk.Label(status_bar, textvariable=self.incoming_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=2, sticky="ew")
-        ttk.Label(status_bar, textvariable=self.processed_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=3, sticky="ew")
 
     def _build_summary_card(self, parent: ttk.Frame, column: int, title: str, value: tk.StringVar) -> None:
         card = ttk.Frame(parent, style="Card.TFrame", padding=(8, 4))
@@ -675,8 +669,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             incoming.mkdir(parents=True, exist_ok=True)
             self.watch_folders = WatchFolders(incoming, self.watch_folders.processed)
             self._save_current_settings()
-            self._refresh_watch_folder_status()
-            self.watch_status.set(f"수신폴더 설정: {incoming}")
+            self.watch_status.set("수신폴더 설정 완료")
 
     def _choose_processed_folder(self) -> None:
         if self.watch_enabled:
@@ -689,13 +682,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             processed.mkdir(parents=True, exist_ok=True)
             self.watch_folders = WatchFolders(self.watch_folders.incoming, processed)
             self._save_current_settings()
-            self._refresh_watch_folder_status()
-            self.watch_status.set(f"백업폴더 설정: {processed}")
-
-    def _refresh_watch_folder_status(self) -> None:
-        if hasattr(self, "incoming_status"):
-            self.incoming_status.set(f"수신 {self.watch_folders.incoming}")
-            self.processed_status.set(f"백업 {self.watch_folders.processed}")
+            self.watch_status.set("백업폴더 설정 완료")
 
     def _preview(self) -> None:
         self._run_job(self._preview_job)
@@ -747,7 +734,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self._save_current_settings()
         self.watch_enabled = True
         self._set_watch_menu_label()
-        self.watch_status.set(f"감시 중: {self.watch_folders.incoming}")
+        self.watch_status.set("감시 중")
         self._poll_watch_folder()
 
     def _set_watch_menu_label(self) -> None:
@@ -787,7 +774,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
                 self._notify("KiCad Parts Collector", f"자동 추가 완료: {len(results)}개 ZIP 처리")
                 self.watch_enabled = True
                 self._set_watch_menu_label()
-                self.watch_status.set(f"감시 중: {self.watch_folders.incoming}")
+                self.watch_status.set("감시 중")
 
         self.after(2000, self._poll_watch_folder)
 
