@@ -24,6 +24,8 @@ from .collector import (
     WatchFolders,
 )
 from .settings import AppSettings, load_settings, save_settings
+from .updater import UpdateError, download_release_asset, fetch_latest_release, install_downloaded_update, is_newer_version
+from .version import APP_VERSION
 
 try:
     import ttkbootstrap as tb
@@ -263,7 +265,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             super().__init__(themename=initial_theme)
         else:
             super().__init__()
-        self.title("KiCad Parts Collector")
+        self.title(f"KiCad Parts Collector {APP_VERSION}")
         self.geometry("1180x760")
         self.minsize(1040, 640)
 
@@ -430,6 +432,11 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             offvalue=False,
         )
         menu_bar.add_cascade(label="설정", menu=settings_menu)
+
+        help_menu = tk.Menu(menu_bar, tearoff=0)
+        help_menu.add_command(label="업데이트 확인", command=self._check_for_update)
+        help_menu.add_command(label="버전 정보", command=self._show_version_info)
+        menu_bar.add_cascade(label="도움말", menu=help_menu)
 
         self.config(menu=menu_bar)
 
@@ -762,6 +769,72 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         except AutostartError as exc:
             self.autostart_enabled.set(_safe_autostart_enabled())
             messagebox.showerror("자동 실행 설정 실패", str(exc))
+
+    def _show_version_info(self) -> None:
+        messagebox.showinfo("버전 정보", f"KiCad Parts Collector\n현재 버전: {APP_VERSION}")
+
+    def _check_for_update(self) -> None:
+        self.status.set("업데이트 확인 중입니다.")
+        thread = threading.Thread(target=self._check_for_update_job, daemon=True)
+        thread.start()
+
+    def _check_for_update_job(self) -> None:
+        try:
+            release = fetch_latest_release()
+        except UpdateError as exc:
+            self.after(0, self._show_error, exc)
+            return
+
+        self.after(0, self._handle_update_release, release)
+
+    def _handle_update_release(self, release) -> None:
+        if not is_newer_version(release.version, APP_VERSION):
+            self.status.set("최신 버전입니다.")
+            messagebox.showinfo("업데이트 확인", f"현재 최신 버전입니다.\n현재 버전: {APP_VERSION}")
+            return
+
+        notes = release.body.strip()
+        if len(notes) > 400:
+            notes = notes[:400] + "..."
+        message = f"새 버전이 있습니다.\n\n현재 버전: {APP_VERSION}\n최신 버전: {release.version}"
+        if notes:
+            message += f"\n\n{notes}"
+        message += "\n\n다운로드하고 설치할까요?"
+        if not messagebox.askyesno("업데이트 확인", message):
+            self.status.set("업데이트 취소")
+            return
+
+        self.status.set("업데이트 다운로드 중입니다.")
+        thread = threading.Thread(target=self._download_update_job, args=(release,), daemon=True)
+        thread.start()
+
+    def _download_update_job(self, release) -> None:
+        try:
+            downloaded_exe = download_release_asset(release.asset)
+        except UpdateError as exc:
+            self.after(0, self._show_error, exc)
+            return
+
+        self.after(0, self._install_update, downloaded_exe)
+
+    def _install_update(self, downloaded_exe: Path) -> None:
+        if not getattr(sys, "frozen", False):
+            self.status.set("업데이트 다운로드 완료")
+            messagebox.showinfo("업데이트 다운로드 완료", f"개발 실행 중에는 자동 교체를 건너뜁니다.\n다운로드 위치: {downloaded_exe}")
+            return
+
+        if not messagebox.askyesno("업데이트 설치", "업데이트 설치를 위해 앱을 종료하고 다시 시작할까요?"):
+            self.status.set("업데이트 설치 대기")
+            return
+
+        try:
+            install_downloaded_update(downloaded_exe, Path(sys.executable))
+        except UpdateError as exc:
+            messagebox.showerror("업데이트 실패", str(exc))
+            self.status.set("업데이트 실패")
+            return
+
+        self._quit_app()
 
     def _poll_watch_folder(self) -> None:
         if not self.watch_enabled:

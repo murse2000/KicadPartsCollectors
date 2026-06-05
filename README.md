@@ -13,10 +13,23 @@ python -m kicad_parts_collectors.main
 
 ```powershell
 python -m pip install pyinstaller
-python -m PyInstaller --onefile --windowed --name KiCadPartsCollector --collect-all tkinterdnd2 --collect-all ttkbootstrap --clean -y run_app.py
+python -m PyInstaller --clean -y KiCadPartsCollector.spec
 ```
 
 생성된 실행파일은 `dist\KiCadPartsCollector.exe`입니다.
+
+## 배포와 업데이트
+
+앱의 현재 버전은 `kicad_parts_collectors/version.py`의 `APP_VERSION`에서 관리합니다.
+
+GitHub Releases에 새 버전을 배포하려면:
+
+1. `APP_VERSION`을 새 버전으로 변경합니다.
+2. 실행파일을 빌드합니다.
+3. GitHub에서 `v버전` 태그로 Release를 생성합니다.
+4. Release asset으로 `dist\KiCadPartsCollector.exe`를 업로드합니다.
+
+앱의 `도움말 > 업데이트 확인`은 GitHub 최신 Release를 확인하고, 현재 버전보다 높으면 `KiCadPartsCollector.exe` asset을 다운로드해 업데이트합니다.
 
 ## 처리 규칙
 
@@ -34,6 +47,7 @@ python -m PyInstaller --onefile --windowed --name KiCadPartsCollector --collect-
 - 시스템 트레이 메뉴에서 창 열기, 감시 시작/중지, Windows 시작 시 자동 실행, 종료를 사용할 수 있습니다.
 - 라이브러리 추가가 완료되면 시스템 알림을 표시합니다.
 - 마지막으로 선택한 라이브러리 폴더는 `%APPDATA%\KiCadPartsCollector\settings.json`에 저장되어 다음 실행 때 자동으로 복원됩니다.
+- `도움말 > 업데이트 확인`으로 GitHub Releases에 올라온 최신 실행파일을 설치할 수 있습니다.
 
 ## 테스트
 
