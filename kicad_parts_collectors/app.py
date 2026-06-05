@@ -483,7 +483,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         detail_body.rowconfigure(2, weight=1)
         detail_body.columnconfigure(1, weight=1)
         ttk.Label(detail_body, text="심볼", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
-        ttk.Label(detail_body, textvariable=self.selected_symbol, style="Count.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 6))
+        symbol_row = ttk.Frame(detail_body, style="Card.TFrame")
+        symbol_row.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+        symbol_row.columnconfigure(0, weight=1)
+        self.symbol_value_label = ttk.Label(symbol_row, textvariable=self.selected_symbol, style="Count.TLabel", cursor="hand2")
+        self.symbol_value_label.grid(row=0, column=0, sticky="w")
+        self.symbol_value_label.bind("<Button-1>", self._copy_selected_symbol)
         ttk.Label(detail_body, text="3D 모델", style="CardTitle.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
         self.model_entry = ttk.Entry(detail_body, textvariable=self.detail_model)
         self.model_entry.grid(row=1, column=1, sticky="ew", pady=(0, 8), ipady=4)
@@ -846,6 +851,15 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.current_properties = {}
         if hasattr(self, "property_table"):
             self.property_table.delete(*self.property_table.get_children())
+
+    def _copy_selected_symbol(self, _event=None) -> None:
+        symbol = self.selected_symbol.get()
+        if symbol == "선택된 파츠 없음":
+            return
+
+        self.clipboard_clear()
+        self.clipboard_append(symbol)
+        self.status.set(f"심볼명 복사 완료: {symbol}")
 
     def _fill_property_table(self) -> None:
         self.property_table.delete(*self.property_table.get_children())
