@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import threading
 import tkinter as tk
 import sys
@@ -39,6 +40,11 @@ try:
     import pystray
 except ImportError:
     pystray = None
+
+
+ERROR_ALREADY_EXISTS = 183
+INSTANCE_MUTEX_NAME = "Local\\KiCadPartsCollector"
+INSTANCE_MUTEX_HANDLE = None
 
 
 AVAILABLE_THEMES = ("flatly", "cosmo", "litera", "minty", "pulse", "darkly", "superhero", "cyborg", "solar")
@@ -212,6 +218,40 @@ def _safe_autostart_enabled() -> bool:
         return is_autostart_enabled()
     except AutostartError:
         return False
+
+
+def _acquire_single_instance() -> bool:
+    global INSTANCE_MUTEX_HANDLE
+    if sys.platform != "win32":
+        return True
+
+    handle = ctypes.windll.kernel32.CreateMutexW(None, True, INSTANCE_MUTEX_NAME)
+    if not handle:
+        return True
+
+    if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return False
+
+    INSTANCE_MUTEX_HANDLE = handle
+    return True
+
+
+def _release_single_instance() -> None:
+    global INSTANCE_MUTEX_HANDLE
+    if sys.platform != "win32" or INSTANCE_MUTEX_HANDLE is None:
+        return
+
+    ctypes.windll.kernel32.ReleaseMutex(INSTANCE_MUTEX_HANDLE)
+    ctypes.windll.kernel32.CloseHandle(INSTANCE_MUTEX_HANDLE)
+    INSTANCE_MUTEX_HANDLE = None
+
+
+def _show_already_running_message() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("KiCad Parts Collector", "이미 실행 중입니다.")
+    root.destroy()
 
 
 class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
@@ -1003,6 +1043,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.watch_enabled = False
         if self.tray_icon is not None:
             self.tray_icon.stop()
+        _release_single_instance()
         self.destroy()
 
     def _start_tray_icon(self) -> None:
@@ -1046,5 +1087,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
 
 
 def main() -> None:
-    app = KicadPartsCollectorApp()
-    app.mainloop()
+    if not _acquire_single_instance():
+        _show_already_running_message()
+        return
+
+    try:
+        app = KicadPartsCollectorApp()
+        app.mainloop()
+    finally:
+        _release_single_instance()
