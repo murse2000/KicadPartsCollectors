@@ -14,6 +14,7 @@ from kicad_parts_collectors.collector import (
     remove_library_entries,
     scan_library,
     summarize_items,
+    update_library_entry,
     WatchFolders,
 )
 
@@ -261,6 +262,55 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual("Linked", entries[0].symbol)
             self.assertTrue(entries[0].footprint_ok)
             self.assertTrue(entries[0].model_ok)
+
+    def test_update_library_entry_edits_properties_and_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics.pretty"
+            model_path = library_root / "3dmodels" / "Old.step"
+            new_model_path = library_root / "3dmodels" / "New.step"
+            footprint_library.mkdir()
+            model_path.parent.mkdir()
+            model_path.write_text("old")
+            new_model_path.write_text("new")
+            symbol_library.write_text(
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "EditMe" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "EditMe" (at 0 0 0))\n'
+                '    (property "Footprint" "hrobotics:EditMe" (at 0 0 0))\n'
+                '    (property "OldOnly" "remove" (at 0 0 0))\n'
+                '  )\n'
+                ')\n'
+            )
+            footprint_path = footprint_library / "EditMe.kicad_mod"
+            footprint_path.write_text(
+                f'(module "EditMe" (layer F.Cu)\n'
+                f'  (model "{model_path.resolve().as_posix()}")\n'
+                f')\n'
+            )
+
+            entry = update_library_entry(
+                library_root,
+                "EditMe",
+                {
+                    "Value": "EditedValue",
+                    "Footprint": "hrobotics:EditMe",
+                    "Datasheet": "https://example.com/ds.pdf",
+                    "CustomField": "CustomValue",
+                },
+                new_model_path.resolve().as_posix(),
+            )
+
+            symbol_text = symbol_library.read_text()
+            footprint_text = footprint_path.read_text()
+            self.assertEqual("EditedValue", entry.value)
+            self.assertEqual("CustomValue", entry.properties["CustomField"])
+            self.assertNotIn("OldOnly", symbol_text)
+            self.assertIn('(property "Datasheet" "https://example.com/ds.pdf"', symbol_text)
+            self.assertIn(new_model_path.resolve().as_posix(), footprint_text)
 
     def test_remove_library_entries_deletes_symbol_and_internal_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

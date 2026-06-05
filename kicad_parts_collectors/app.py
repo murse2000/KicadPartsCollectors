@@ -19,6 +19,7 @@ from .collector import (
     remove_library_entries,
     scan_library,
     summarize_items,
+    update_library_entry,
 )
 from .settings import AppSettings, load_settings, save_settings
 
@@ -234,6 +235,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.footprint_count = tk.StringVar(value="0")
         self.model_count = tk.StringVar(value="0")
         self.library_status = tk.StringVar(value="라이브러리 상태: -")
+        self.selected_symbol = tk.StringVar(value="선택된 파츠 없음")
+        self.detail_model = tk.StringVar()
+        self.property_name = tk.StringVar()
+        self.property_value = tk.StringVar()
+        self.library_entries = {}
+        self.current_properties = {}
         self.batch_directory = tk.StringVar()
         self.watch_status = tk.StringVar(value="감시 중지")
         self.autostart_enabled = tk.BooleanVar(value=_safe_autostart_enabled())
@@ -453,24 +460,68 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.library_table.column("fp_ok", width=48, anchor=tk.CENTER, stretch=False)
         self.library_table.column("model_ok", width=48, anchor=tk.CENTER, stretch=False)
         self.library_table.grid(row=1, column=0, sticky="nsew")
+        self.library_table.bind("<<TreeviewSelect>>", self._show_selected_library_entry)
         library_scroll = ttk.Scrollbar(library_card, orient=tk.VERTICAL, command=self.library_table.yview)
         library_scroll.grid(row=1, column=1, sticky="ns")
         self.library_table.configure(yscrollcommand=library_scroll.set)
 
         preview_card = ttk.Frame(content, style="Card.TFrame", padding=10)
-        preview_card.rowconfigure(2, weight=3)
-        preview_card.rowconfigure(4, weight=2)
+        preview_card.rowconfigure(1, weight=3)
+        preview_card.rowconfigure(3, weight=1)
         preview_card.columnconfigure(0, weight=1)
         content.add(preview_card, weight=2)
 
-        preview_header = ttk.Frame(preview_card, style="Card.TFrame")
-        preview_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        preview_header.columnconfigure(0, weight=1)
-        ttk.Label(preview_header, text="ZIP 추가 대상", style="Field.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(preview_header, text="표 위에 ZIP 파일을 드롭할 수 있습니다.", style="Muted.TLabel").grid(row=0, column=1, sticky="e")
+        detail_header = ttk.Frame(preview_card, style="Card.TFrame")
+        detail_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        detail_header.columnconfigure(0, weight=1)
+        ttk.Label(detail_header, text="선택 파츠 상세", style="Field.TLabel").grid(row=0, column=0, sticky="w")
+        self.save_detail_button = ttk.Button(detail_header, text="저장", style="Primary.TButton", command=self._save_selected_library_entry)
+        self.save_detail_button.grid(row=0, column=1)
 
-        summary = ttk.Frame(preview_card, style="Card.TFrame")
-        summary.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        detail_body = ttk.Frame(preview_card, style="Card.TFrame")
+        detail_body.grid(row=1, column=0, sticky="nsew")
+        detail_body.rowconfigure(2, weight=1)
+        detail_body.columnconfigure(1, weight=1)
+        ttk.Label(detail_body, text="심볼", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+        ttk.Label(detail_body, textvariable=self.selected_symbol, style="Count.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 6))
+        ttk.Label(detail_body, text="3D 모델", style="CardTitle.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        self.model_entry = ttk.Entry(detail_body, textvariable=self.detail_model)
+        self.model_entry.grid(row=1, column=1, sticky="ew", pady=(0, 8), ipady=4)
+
+        property_columns = ("name", "value")
+        self.property_table = ttk.Treeview(detail_body, columns=property_columns, show="headings", height=10)
+        self.property_table.heading("name", text="속성")
+        self.property_table.heading("value", text="값")
+        self.property_table.column("name", width=150, anchor=tk.W, stretch=False)
+        self.property_table.column("value", width=360, anchor=tk.W)
+        self.property_table.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        self.property_table.bind("<<TreeviewSelect>>", self._select_property)
+        property_scroll = ttk.Scrollbar(detail_body, orient=tk.VERTICAL, command=self.property_table.yview)
+        property_scroll.grid(row=2, column=2, sticky="ns")
+        self.property_table.configure(yscrollcommand=property_scroll.set)
+
+        property_editor = ttk.Frame(detail_body, style="Card.TFrame")
+        property_editor.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        property_editor.columnconfigure(1, weight=1)
+        property_editor.columnconfigure(3, weight=2)
+        ttk.Label(property_editor, text="속성", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        ttk.Entry(property_editor, textvariable=self.property_name, width=18).grid(row=0, column=1, sticky="ew", padx=(0, 8), ipady=3)
+        ttk.Label(property_editor, text="값", style="CardTitle.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        ttk.Entry(property_editor, textvariable=self.property_value).grid(row=0, column=3, sticky="ew", padx=(0, 8), ipady=3)
+        ttk.Button(property_editor, text="추가/수정", style="Secondary.TButton", command=self._upsert_property).grid(row=0, column=4, padx=(0, 6))
+        ttk.Button(property_editor, text="삭제", style="Secondary.TButton", command=self._delete_property).grid(row=0, column=5)
+
+        ttk.Label(preview_card, text="ZIP 작업", style="Field.TLabel").grid(row=2, column=0, sticky="w", pady=(12, 6))
+        work_tabs = ttk.Notebook(preview_card)
+        work_tabs.grid(row=3, column=0, sticky="nsew")
+
+        preview_tab = ttk.Frame(work_tabs, style="Card.TFrame", padding=8)
+        preview_tab.rowconfigure(1, weight=1)
+        preview_tab.columnconfigure(0, weight=1)
+        work_tabs.add(preview_tab, text="미리보기")
+
+        summary = ttk.Frame(preview_tab, style="Card.TFrame")
+        summary.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         for column in range(3):
             summary.columnconfigure(column, weight=1)
         self._build_summary_card(summary, 0, "심볼", self.symbol_count)
@@ -478,32 +529,36 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self._build_summary_card(summary, 2, "3D 모델", self.model_count)
 
         columns = ("kind", "source", "destination")
-        self.items_table = ttk.Treeview(preview_card, columns=columns, show="headings")
+        self.items_table = ttk.Treeview(preview_tab, columns=columns, show="headings", height=5)
         self.items_table.heading("kind", text="종류")
         self.items_table.heading("source", text="ZIP 내부 경로")
         self.items_table.heading("destination", text="추가될 위치")
         self.items_table.column("kind", width=78, anchor=tk.CENTER, stretch=False)
         self.items_table.column("source", width=260, anchor=tk.W)
         self.items_table.column("destination", width=380, anchor=tk.W)
-        self.items_table.grid(row=2, column=0, sticky="nsew")
+        self.items_table.grid(row=1, column=0, sticky="nsew")
         self.drop_target = self.items_table
 
-        y_scroll = ttk.Scrollbar(preview_card, orient=tk.VERTICAL, command=self.items_table.yview)
-        y_scroll.grid(row=2, column=1, sticky="ns")
+        y_scroll = ttk.Scrollbar(preview_tab, orient=tk.VERTICAL, command=self.items_table.yview)
+        y_scroll.grid(row=1, column=1, sticky="ns")
         self.items_table.configure(yscrollcommand=y_scroll.set)
 
-        ttk.Label(preview_card, text="일괄 추가 결과", style="Field.TLabel").grid(row=3, column=0, sticky="w", pady=(10, 6))
+        batch_tab = ttk.Frame(work_tabs, style="Card.TFrame", padding=8)
+        batch_tab.rowconfigure(0, weight=1)
+        batch_tab.columnconfigure(0, weight=1)
+        work_tabs.add(batch_tab, text="일괄 결과")
+
         batch_columns = ("zip", "status", "message")
-        self.batch_table = ttk.Treeview(preview_card, columns=batch_columns, show="headings")
+        self.batch_table = ttk.Treeview(batch_tab, columns=batch_columns, show="headings", height=5)
         self.batch_table.heading("zip", text="ZIP")
         self.batch_table.heading("status", text="상태")
         self.batch_table.heading("message", text="메시지")
         self.batch_table.column("zip", width=220, anchor=tk.W)
         self.batch_table.column("status", width=70, anchor=tk.CENTER, stretch=False)
         self.batch_table.column("message", width=420, anchor=tk.W)
-        self.batch_table.grid(row=4, column=0, sticky="nsew")
-        batch_scroll = ttk.Scrollbar(preview_card, orient=tk.VERTICAL, command=self.batch_table.yview)
-        batch_scroll.grid(row=4, column=1, sticky="ns")
+        self.batch_table.grid(row=0, column=0, sticky="nsew")
+        batch_scroll = ttk.Scrollbar(batch_tab, orient=tk.VERTICAL, command=self.batch_table.yview)
+        batch_scroll.grid(row=0, column=1, sticky="ns")
         self.batch_table.configure(yscrollcommand=batch_scroll.set)
 
         status_bar = ttk.Frame(root)
@@ -745,9 +800,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         except CollectorError as exc:
             self.library_status.set(f"라이브러리 상태: {exc}")
             self.library_table.delete(*self.library_table.get_children())
+            self.library_entries = {}
+            self._clear_entry_detail()
             return
 
         self.library_table.delete(*self.library_table.get_children())
+        self.library_entries = {entry.symbol: entry for entry in entries}
         broken = 0
         for entry in entries:
             fp_status = "OK" if entry.footprint_ok else "누락"
@@ -762,6 +820,100 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             )
 
         self.library_status.set(f"라이브러리 상태: {len(entries)}개 / 문제 {broken}개")
+
+    def _show_selected_library_entry(self, _event=None) -> None:
+        selected = self.library_table.selection()
+        if not selected:
+            self._clear_entry_detail()
+            return
+
+        symbol = self.library_table.item(selected[0], "values")[0]
+        entry = self.library_entries.get(symbol)
+        if entry is None:
+            self._clear_entry_detail()
+            return
+
+        self.selected_symbol.set(entry.symbol)
+        self.detail_model.set(entry.model)
+        self.current_properties = dict(entry.properties)
+        self._fill_property_table()
+
+    def _clear_entry_detail(self) -> None:
+        self.selected_symbol.set("선택된 파츠 없음")
+        self.detail_model.set("")
+        self.property_name.set("")
+        self.property_value.set("")
+        self.current_properties = {}
+        if hasattr(self, "property_table"):
+            self.property_table.delete(*self.property_table.get_children())
+
+    def _fill_property_table(self) -> None:
+        self.property_table.delete(*self.property_table.get_children())
+        preferred = ["Reference", "Value", "Footprint", "Datasheet", "Description"]
+        ordered_names = [name for name in preferred if name in self.current_properties]
+        ordered_names.extend(sorted(name for name in self.current_properties if name not in ordered_names))
+        for name in ordered_names:
+            self.property_table.insert("", tk.END, iid=name, values=(name, self.current_properties[name]))
+
+    def _select_property(self, _event=None) -> None:
+        selected = self.property_table.selection()
+        if not selected:
+            return
+
+        name = selected[0]
+        self.property_name.set(name)
+        self.property_value.set(self.current_properties.get(name, ""))
+
+    def _upsert_property(self) -> None:
+        name = self.property_name.get().strip()
+        if not name:
+            messagebox.showerror("확인 필요", "속성 이름을 입력하세요.")
+            return
+
+        self.current_properties[name] = self.property_value.get()
+        self._fill_property_table()
+
+    def _delete_property(self) -> None:
+        name = self.property_name.get().strip()
+        if not name:
+            messagebox.showerror("확인 필요", "삭제할 속성을 선택하세요.")
+            return
+        if name not in self.current_properties:
+            return
+        if not messagebox.askyesno("속성 삭제", f"{name} 속성을 삭제할까요?"):
+            return
+
+        del self.current_properties[name]
+        self.property_name.set("")
+        self.property_value.set("")
+        self._fill_property_table()
+
+    def _save_selected_library_entry(self) -> None:
+        symbol = self.selected_symbol.get()
+        if symbol == "선택된 파츠 없음":
+            messagebox.showerror("확인 필요", "수정할 파츠를 선택하세요.")
+            return
+        if "Value" not in self.current_properties:
+            messagebox.showerror("확인 필요", "Value 속성은 필요합니다.")
+            return
+
+        try:
+            entry = update_library_entry(
+                Path(self.library_root.get()),
+                symbol,
+                dict(self.current_properties),
+                self.detail_model.get().strip(),
+            )
+        except CollectorError as exc:
+            messagebox.showerror("저장 실패", str(exc))
+            return
+
+        self.status.set(f"저장 완료: {entry.symbol}")
+        self._refresh_library_view()
+        if self.library_table.exists(entry.symbol):
+            self.library_table.selection_set(entry.symbol)
+            self.library_table.focus(entry.symbol)
+            self._show_selected_library_entry()
 
     def _delete_selected_library_entries(self) -> None:
         selected = list(self.library_table.selection())
@@ -781,6 +933,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
 
         self.status.set(f"삭제 완료: 심볼 {result.symbols}개, 풋프린트 {result.footprints}개, 3D 모델 {result.models}개")
         self._refresh_library_view()
+        self._clear_entry_detail()
 
     def _change_theme(self, _event=None) -> None:
         theme = self.theme_name.get()
@@ -806,6 +959,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.install_button.configure(state=state)
         self.refresh_button.configure(state=state)
         self.delete_button.configure(state=state)
+        self.save_detail_button.configure(state=state)
+        self.model_entry.configure(state=state)
 
     def _on_unmap(self, _event) -> None:
         if self.state() == "iconic" and not self.quitting:

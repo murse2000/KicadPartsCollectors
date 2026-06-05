@@ -19,6 +19,9 @@ class LibraryEntry:
     symbol: str
     value: str
     footprint: str
+    datasheet: str
+    description: str
+    properties: dict[str, str]
     footprint_ok: bool
     model: str
     model_ok: bool
@@ -183,8 +186,11 @@ def scan_library(library_root: Path) -> list[LibraryEntry]:
         if symbol_name is None:
             continue
 
-        value = _property_value(block, "Value") or symbol_name
-        footprint = _property_value(block, "Footprint") or ""
+        properties = _property_values(block)
+        value = properties.get("Value") or symbol_name
+        footprint = properties.get("Footprint") or ""
+        datasheet = properties.get("Datasheet") or ""
+        description = properties.get("Description") or ""
         footprint_path = _footprint_path_for_reference(footprint, footprint_library, nickname)
         footprint_ok = footprint_path is not None and footprint_path.exists()
         model = ""
@@ -197,9 +203,45 @@ def scan_library(library_root: Path) -> list[LibraryEntry]:
                 model = model_values[0]
                 model_ok = _model_exists(model, footprint_library)
 
-        entries.append(LibraryEntry(symbol_name, value, footprint, footprint_ok, model, model_ok))
+        entries.append(LibraryEntry(symbol_name, value, footprint, datasheet, description, properties, footprint_ok, model, model_ok))
 
     return entries
+
+
+def update_library_entry(
+    library_root: Path,
+    symbol: str,
+    properties: dict[str, str],
+    model: str,
+) -> LibraryEntry:
+    library_root = Path(library_root)
+    symbol_library = _symbol_library_for(library_root)
+    footprint_library = _footprint_library_for(library_root)
+    nickname = footprint_library.stem
+    text = symbol_library.read_text(encoding="utf-8-sig")
+
+    for block in _symbol_blocks(text):
+        if _symbol_name(block) != symbol:
+            continue
+
+        updated_block = block
+        for name, property_value in properties.items():
+            updated_block = _upsert_property_value(updated_block, name, property_value)
+
+        for name in set(_property_values(updated_block)) - set(properties):
+            updated_block = _remove_property(updated_block, name)
+
+        text = text.replace(block, updated_block, 1)
+        symbol_library.write_text(text, encoding="utf-8", newline="\n")
+
+        footprint = properties.get("Footprint", "")
+        footprint_path = _footprint_path_for_reference(footprint, footprint_library, nickname)
+        if model and footprint_path is not None and footprint_path.exists():
+            _write_footprint_model(footprint_path, model)
+
+        return next(entry for entry in scan_library(library_root) if entry.symbol == symbol)
+
+    raise CollectorError("수정할 심볼을 찾지 못했습니다.")
 
 
 def remove_library_entries(library_root: Path, symbols: list[str]) -> RemovalResult:
@@ -636,6 +678,30 @@ def _property_value(text: str, property_name: str) -> str | None:
     return text[start:end]
 
 
+def _property_values(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    index = 0
+    marker = '(property "'
+    while True:
+        start = text.find(marker, index)
+        if start < 0:
+            return values
+
+        name_start = start + len(marker)
+        name_end = _quoted_value_end(text, name_start)
+        value_marker_start = name_end + 1
+        while value_marker_start < len(text) and text[value_marker_start].isspace():
+            value_marker_start += 1
+        if value_marker_start >= len(text) or text[value_marker_start] != '"':
+            index = name_end + 1
+            continue
+
+        value_start = value_marker_start + 1
+        value_end = _quoted_value_end(text, value_start)
+        values[text[name_start:name_end]] = text[value_start:value_end]
+        index = value_end + 1
+
+
 def _replace_property_value(text: str, property_name: str, value: str) -> str:
     marker = f'(property "{property_name}" "'
     start = text.find(marker)
@@ -645,6 +711,78 @@ def _replace_property_value(text: str, property_name: str, value: str) -> str:
     start += len(marker)
     end = _quoted_value_end(text, start)
     return text[:start] + _escape_symbol_value(value) + text[end:]
+
+
+def _upsert_property_value(text: str, property_name: str, value: str) -> str:
+    if _property_value(text, property_name) is not None:
+        return _replace_property_value(text, property_name, value)
+
+    insert_at = text.rfind("\n  )")
+    if insert_at < 0:
+        insert_at = text.rfind(")")
+    if insert_at < 0:
+        raise CollectorError("심볼 속성을 추가할 위치를 찾지 못했습니다.")
+
+    property_line = f'\n    (property "{property_name}" "{_escape_symbol_value(value)}" (at 0 0 0))'
+    return text[:insert_at] + property_line + text[insert_at:]
+
+
+def _remove_property(text: str, property_name: str) -> str:
+    marker = f'(property "{property_name}" '
+    start = text.find(marker)
+    if start < 0:
+        return text
+
+    line_start = text.rfind("\n", 0, start)
+    line_start = 0 if line_start < 0 else line_start
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if char == '"' and not escaped:
+                in_string = False
+            escaped = char == "\\" and not escaped
+            if char != "\\":
+                escaped = False
+            continue
+        if char == '"':
+            in_string = True
+            escaped = False
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                if end < len(text) and text[end] == "\n":
+                    end += 1
+                return text[:line_start] + text[end:]
+
+    raise CollectorError("심볼 속성을 삭제할 범위를 찾지 못했습니다.")
+
+
+def _write_footprint_model(footprint_path: Path, model: str) -> None:
+    text = footprint_path.read_text(encoding="utf-8-sig")
+    model_values = _model_values(text)
+    if model_values:
+        text = _replace_model_value(text, model_values[0], model)
+    else:
+        insert_at = text.rfind(")")
+        if insert_at < 0:
+            raise CollectorError("풋프린트 3D 모델을 추가할 위치를 찾지 못했습니다.")
+        model_block = (
+            f'\n  (model "{_escape_symbol_value(model)}"\n'
+            f'    (at (xyz 0 0 0))\n'
+            f'    (scale (xyz 1 1 1))\n'
+            f'    (rotate (xyz 0 0 0))\n'
+            f'  )\n'
+        )
+        text = text[:insert_at] + model_block + text[insert_at:]
+
+    footprint_path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def _quoted_value_end(text: str, start: int) -> int:
