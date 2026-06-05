@@ -384,11 +384,6 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         header.columnconfigure(1, weight=1)
 
         ttk.Label(header, text="KiCad Parts Collector", style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            header,
-            text="심볼은 단일 라이브러리 파일에 병합하고, 풋프린트는 단일 .pretty 폴더에 추가합니다.",
-            style="Muted.TLabel",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         form = ttk.Frame(root, style="Card.TFrame", padding=14)
         form.grid(row=1, column=0, sticky="ew")
@@ -438,12 +433,19 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         library_header = ttk.Frame(library_card, style="Card.TFrame")
         library_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         library_header.columnconfigure(0, weight=1)
+        library_header.columnconfigure(1, weight=0)
         ttk.Label(library_header, text="라이브러리 연결 상태", style="Field.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(library_header, textvariable=self.library_status, style="Muted.TLabel").grid(row=0, column=1, sticky="e", padx=(0, 8))
         self.refresh_button = ttk.Button(library_header, text="새로고침", style="Secondary.TButton", command=self._refresh_library_view)
-        self.refresh_button.grid(row=0, column=2, padx=(0, 6))
+        self.refresh_button.grid(row=0, column=1, padx=(0, 6))
         self.delete_button = ttk.Button(library_header, text="선택 삭제", style="Secondary.TButton", command=self._delete_selected_library_entries)
-        self.delete_button.grid(row=0, column=3)
+        self.delete_button.grid(row=0, column=2)
+        ttk.Label(library_header, textvariable=self.library_status, style="Muted.TLabel").grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(4, 0),
+        )
 
         library_columns = ("symbol", "value", "footprint", "fp_ok", "model_ok")
         self.library_table = ttk.Treeview(library_card, columns=library_columns, show="headings")
