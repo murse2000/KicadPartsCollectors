@@ -376,17 +376,10 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.root_frame = root
         root.pack(fill=tk.BOTH, expand=True)
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(2, weight=1)
-
-        header = ttk.Frame(root)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        header.columnconfigure(0, weight=1)
-        header.columnconfigure(1, weight=1)
-
-        ttk.Label(header, text="KiCad Parts Collector", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        root.rowconfigure(1, weight=1)
 
         form = ttk.Frame(root, style="Card.TFrame", padding=14)
-        form.grid(row=1, column=0, sticky="ew")
+        form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(0, weight=3)
         form.columnconfigure(1, weight=3)
         form.columnconfigure(2, weight=0)
@@ -423,7 +416,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.install_button.pack(side=tk.LEFT, padx=(8, 0), ipadx=10)
 
         content = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-        content.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        content.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
 
         library_card = ttk.Frame(content, style="Card.TFrame", padding=10)
         library_card.rowconfigure(1, weight=1)
@@ -514,7 +507,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.batch_table.configure(yscrollcommand=batch_scroll.set)
 
         status_bar = ttk.Frame(root)
-        status_bar.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        status_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         status_bar.columnconfigure(0, weight=1)
         status_bar.columnconfigure(1, weight=0)
         ttk.Label(status_bar, textvariable=self.status, style="Muted.TLabel").grid(row=0, column=0, sticky="w")
