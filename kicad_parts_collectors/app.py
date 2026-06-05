@@ -21,6 +21,7 @@ from .collector import (
     scan_library,
     summarize_items,
     update_library_entry,
+    WatchFolders,
 )
 from .settings import AppSettings, load_settings, save_settings
 
@@ -285,7 +286,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.watch_status = tk.StringVar(value="감시 중지")
         self.autostart_enabled = tk.BooleanVar(value=_safe_autostart_enabled())
         self.watch_enabled = False
-        self.watch_folders = ensure_watch_folders()
+        self.watch_folders = self._load_watch_folders()
         self.tray_icon = None
         self.tray_hidden = False
         self.quitting = False
@@ -311,6 +312,14 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             return False
 
         return True
+
+    def _load_watch_folders(self) -> WatchFolders:
+        default_folders = ensure_watch_folders()
+        incoming = Path(self.app_settings.incoming_folder) if self.app_settings.incoming_folder else default_folders.incoming
+        processed = Path(self.app_settings.processed_folder) if self.app_settings.processed_folder else default_folders.processed
+        incoming.mkdir(parents=True, exist_ok=True)
+        processed.mkdir(parents=True, exist_ok=True)
+        return WatchFolders(incoming, processed)
 
     def _set_window_icon(self) -> None:
         icon_path = _resource_path("assets/app_icon.ico")
@@ -356,13 +365,14 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         style.configure("Muted.TLabel", background=page_bg, foreground=muted)
         style.configure("Card.TFrame", background=card_bg, relief=tk.FLAT)
         style.configure("Toolbar.TFrame", background=card_bg, relief=tk.FLAT)
-        style.configure("Status.TFrame", background=heading_bg, relief=tk.FLAT)
+        style.configure("Status.TFrame", background=heading_bg, relief=tk.FLAT, borderwidth=1)
         style.configure("Drop.TFrame", background=soft_bg, relief=tk.FLAT)
         style.configure("CardTitle.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=muted)
         style.configure("Count.TLabel", font=("Malgun Gothic", 11, "bold"), background=card_bg, foreground=text)
         style.configure("Field.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=field)
         style.configure("Toolbar.TLabel", font=("Malgun Gothic", 9, "bold"), background=card_bg, foreground=muted)
         style.configure("Status.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=muted)
+        style.configure("StatusCell.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=text, relief=tk.SUNKEN, padding=(8, 2))
         style.configure("DropTitle.TLabel", font=("Malgun Gothic", 12, "bold"), background=soft_bg, foreground=primary)
         style.configure("DropText.TLabel", background=soft_bg, foreground=muted)
         style.configure("TEntry", fieldbackground=entry_bg, foreground=text, bordercolor=heading_bg, lightcolor=heading_bg, darkcolor=heading_bg)
@@ -396,8 +406,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.watch_menu = tk.Menu(menu_bar, tearoff=0)
         self.watch_menu.add_command(label="감시 시작", command=self._toggle_watch)
         self.watch_menu.add_separator()
-        self.watch_menu.add_command(label=f"수신 폴더: {self.watch_folders.incoming}", state=tk.DISABLED)
-        self.watch_menu.add_command(label=f"백업 폴더: {self.watch_folders.processed}", state=tk.DISABLED)
+        self.watch_menu.add_command(label="수신폴더 설정", command=self._choose_incoming_folder)
+        self.watch_menu.add_command(label="백업폴더 설정", command=self._choose_processed_folder)
         menu_bar.add_cascade(label="감시", menu=self.watch_menu)
 
         settings_menu = tk.Menu(menu_bar, tearoff=0)
@@ -596,12 +606,18 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         batch_scroll.grid(row=0, column=1, sticky="ns")
         self.batch_table.configure(yscrollcommand=batch_scroll.set)
 
-        status_bar = ttk.Frame(root, style="Status.TFrame", padding=(8, 4))
+        status_bar = ttk.Frame(root, style="Status.TFrame")
         status_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        status_bar.columnconfigure(0, weight=1)
-        status_bar.columnconfigure(1, weight=0)
-        ttk.Label(status_bar, textvariable=self.status, style="Status.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(status_bar, textvariable=self.watch_status, style="Status.TLabel").grid(row=0, column=1, sticky="e")
+        status_bar.columnconfigure(0, weight=3)
+        status_bar.columnconfigure(1, weight=1)
+        status_bar.columnconfigure(2, weight=2)
+        status_bar.columnconfigure(3, weight=2)
+        ttk.Label(status_bar, textvariable=self.status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=0, sticky="ew")
+        ttk.Label(status_bar, textvariable=self.watch_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=1, sticky="ew")
+        self.incoming_status = tk.StringVar(value=f"수신 {self.watch_folders.incoming}")
+        self.processed_status = tk.StringVar(value=f"백업 {self.watch_folders.processed}")
+        ttk.Label(status_bar, textvariable=self.incoming_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=2, sticky="ew")
+        ttk.Label(status_bar, textvariable=self.processed_status, style="StatusCell.TLabel", anchor=tk.W).grid(row=0, column=3, sticky="ew")
 
     def _build_summary_card(self, parent: ttk.Frame, column: int, title: str, value: tk.StringVar) -> None:
         card = ttk.Frame(parent, style="Card.TFrame", padding=(8, 4))
@@ -647,6 +663,39 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             self.library_root.set(path)
             self._save_current_settings()
             self._refresh_library_view()
+
+    def _choose_incoming_folder(self) -> None:
+        if self.watch_enabled:
+            messagebox.showerror("확인 필요", "감시 중에는 수신폴더를 변경할 수 없습니다.")
+            return
+
+        path = filedialog.askdirectory(title="수신폴더 선택", initialdir=str(self.watch_folders.incoming))
+        if path:
+            incoming = Path(path)
+            incoming.mkdir(parents=True, exist_ok=True)
+            self.watch_folders = WatchFolders(incoming, self.watch_folders.processed)
+            self._save_current_settings()
+            self._refresh_watch_folder_status()
+            self.watch_status.set(f"수신폴더 설정: {incoming}")
+
+    def _choose_processed_folder(self) -> None:
+        if self.watch_enabled:
+            messagebox.showerror("확인 필요", "감시 중에는 백업폴더를 변경할 수 없습니다.")
+            return
+
+        path = filedialog.askdirectory(title="백업폴더 선택", initialdir=str(self.watch_folders.processed))
+        if path:
+            processed = Path(path)
+            processed.mkdir(parents=True, exist_ok=True)
+            self.watch_folders = WatchFolders(self.watch_folders.incoming, processed)
+            self._save_current_settings()
+            self._refresh_watch_folder_status()
+            self.watch_status.set(f"백업폴더 설정: {processed}")
+
+    def _refresh_watch_folder_status(self) -> None:
+        if hasattr(self, "incoming_status"):
+            self.incoming_status.set(f"수신 {self.watch_folders.incoming}")
+            self.processed_status.set(f"백업 {self.watch_folders.processed}")
 
     def _preview(self) -> None:
         self._run_job(self._preview_job)
@@ -991,7 +1040,14 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.update_idletasks()
 
     def _save_current_settings(self) -> None:
-        save_settings(AppSettings(library_root=self.library_root.get().strip(), theme=self.theme_name.get()))
+        save_settings(
+            AppSettings(
+                library_root=self.library_root.get().strip(),
+                theme=self.theme_name.get(),
+                incoming_folder=str(self.watch_folders.incoming),
+                processed_folder=str(self.watch_folders.processed),
+            )
+        )
 
     def _set_busy(self, busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
