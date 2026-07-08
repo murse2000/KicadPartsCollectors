@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+incoming_zips/
+processed_zips/
