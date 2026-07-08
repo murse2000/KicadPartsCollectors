@@ -1,56 +1,136 @@
 # KiCad Parts Collector
 
-ZIP 파일로 받은 KiCad 심볼, 풋프린트, 3D STEP 파일을 사내 라이브러리 폴더에 추가하는 파이썬 데스크톱 앱입니다.
+KiCad Parts Collector는 ZIP 파일로 받은 KiCad 회로도 심볼, 풋프린트, 3D STEP 모델을 사내 KiCad 라이브러리 구조에 맞게 자동 정리해 주는 Windows 데스크톱 앱입니다.
 
-## 실행
+부품 라이브러리를 여러 사람이 함께 관리할 때 반복되는 파일 복사, 심볼 병합, 풋프린트 연결, 3D 모델 경로 보정 작업을 줄이는 것이 목표입니다.
+
+## 주요 기능
+
+- ZIP 파일 드래그 앤 드롭 또는 파일 선택으로 부품 라이브러리 추가
+- 폴더 안의 ZIP 파일을 한 번에 처리하는 일괄 추가
+- 지정한 수신 폴더를 감시하다가 ZIP 파일이 들어오면 자동 추가
+- 처리된 ZIP 파일을 백업 폴더로 이동
+- 심볼은 단일 `.kicad_sym` 라이브러리 파일에 병합
+- 풋프린트는 단일 `.pretty` 폴더에 `.kicad_mod` 파일로 추가
+- 3D 모델은 단일 `3dmodels` 폴더에 `.step` 또는 `.stp` 파일로 추가
+- 심볼의 `Footprint` 속성을 자동 보정
+- 풋프린트 내부 3D 모델 경로 자동 보정
+- 라이브러리 연결 상태, 풋프린트 연결 상태, 3D 모델 연결 상태 확인
+- 선택한 파츠의 속성 보기, 추가, 수정, 삭제
+- 선택한 파츠 삭제 시 심볼, 풋프린트, 3D 모델 정리
+- 시스템 트레이 상주, 최소화 시 트레이로 숨김
+- Windows 시작 시 자동 실행 옵션
+- GitHub Releases 기반 온라인 업데이트
+
+## 대상 라이브러리 구조
+
+앱은 선택한 라이브러리 루트 폴더 아래에서 다음 구조를 사용합니다.
+
+```text
+library-root/
+  symbols/
+    hrobotics_symbol.kicad_sym
+  footprints/
+    hrobotics.pretty/
+      PART_NAME.kicad_mod
+  3dmodels/
+    PART_NAME.step
+```
+
+심볼 라이브러리 파일명과 풋프린트 라이브러리 폴더명은 기존 라이브러리 상태에 맞춰 앱이 사용합니다. 풋프린트 참조는 KiCad 형식인 `라이브러리닉네임:풋프린트명`으로 저장됩니다.
+
+## 기본 사용 흐름
+
+1. 앱을 실행합니다.
+2. 사내 KiCad 라이브러리 루트 폴더를 선택합니다.
+3. ZIP 파일을 선택하거나 앱 위에 드래그 앤 드롭합니다.
+4. `미리보기`로 추가될 심볼, 풋프린트, 3D 모델을 확인합니다.
+5. `라이브러리에 추가`를 누릅니다.
+6. 좌측 라이브러리 목록에서 연결 상태를 확인합니다.
+7. 필요한 경우 우측 상세 패널에서 파츠 속성을 수정합니다.
+
+## ZIP 처리 규칙
+
+- ZIP 안의 `.kicad_sym`, `.kicad_mod`, `.step`, `.stp` 파일을 찾습니다.
+- 심볼의 `Value` 속성을 기준 이름으로 사용합니다.
+- `Value`가 없으면 심볼 이름을 기준으로 사용합니다.
+- 심볼, 풋프린트, 3D 모델 파일명은 기준 이름에 맞춰 보정합니다.
+- 심볼의 `Footprint` 값은 실제 풋프린트 라이브러리와 파일명에 맞게 자동 연결합니다.
+- 풋프린트의 3D 모델 경로는 실제 STEP 파일 위치에 맞게 자동 보정합니다.
+- 이미 같은 대상 파일이 있으면 덮어쓰지 않고 처리를 중단합니다.
+
+## 감시 폴더 자동 추가
+
+`감시 > 감시 시작`을 사용하면 지정한 수신 폴더를 주기적으로 확인합니다.
+
+ZIP 파일이 수신 폴더에 들어오면 앱이 자동으로 라이브러리에 추가하고, 처리된 ZIP 파일은 백업 폴더로 이동합니다.
+
+감시를 시작하려면 먼저 라이브러리 위치가 선택되어 있어야 합니다.
+
+## 온라인 업데이트
+
+앱의 `도움말 > 업데이트 확인` 메뉴는 GitHub Releases의 최신 버전을 확인합니다.
+
+현재 실행 중인 버전보다 높은 Release가 있으면 `KiCadPartsCollector.exe` asset을 다운로드하고 앱을 교체합니다.
+
+Release asset 이름은 다음과 같아야 합니다.
+
+```text
+KiCadPartsCollector.exe
+```
+
+## 다운로드
+
+최신 실행파일은 GitHub Releases에서 받을 수 있습니다.
+
+```text
+https://github.com/murse2000/KicadPartsCollectors/releases
+```
+
+## 개발 환경에서 실행
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m kicad_parts_collectors.main
 ```
 
-## 단일 실행파일
+## 단일 실행파일 빌드
 
 ```powershell
 python -m pip install pyinstaller
 python -m PyInstaller --clean -y KiCadPartsCollector.spec
 ```
 
-생성된 실행파일은 `dist\KiCadPartsCollector.exe`입니다.
+빌드 결과는 다음 위치에 생성됩니다.
 
-## 배포와 업데이트
+```text
+dist\KiCadPartsCollector.exe
+```
 
-앱의 현재 버전은 `kicad_parts_collectors/version.py`의 `APP_VERSION`에서 관리합니다.
+## 새 버전 배포
 
-GitHub Releases에 새 버전을 배포하려면:
-
-1. `APP_VERSION`을 새 버전으로 변경합니다.
+1. `kicad_parts_collectors/version.py`의 `APP_VERSION`을 올립니다.
 2. 실행파일을 빌드합니다.
-3. GitHub에서 `v버전` 태그로 Release를 생성합니다.
-4. Release asset으로 `dist\KiCadPartsCollector.exe`를 업로드합니다.
-
-앱의 `도움말 > 업데이트 확인`은 GitHub 최신 Release를 확인하고, 현재 버전보다 높으면 `KiCadPartsCollector.exe` asset을 다운로드해 업데이트합니다.
-
-## 처리 규칙
-
-- `.kicad_sym` 파일은 선택한 라이브러리 위치 안의 단일 `.kicad_sym` 파일에 병합합니다.
-- `.kicad_mod` 파일은 선택한 라이브러리 위치 안의 단일 `.pretty` 폴더에 추가합니다.
-- 파일명과 내부 참조 이름은 ZIP 안의 심볼 `Value` 값을 기준으로 통일합니다. `Value`가 없으면 심볼 이름을 사용합니다.
-- 심볼의 `Footprint` 값은 `.pretty` 폴더명과 `.kicad_mod` 파일명을 사용해 `라이브러리닉네임:풋프린트명` 형식으로 자동 연결합니다.
-- `.step`, `.stp` 파일은 `3dmodels` 폴더에 바로 추가합니다.
-- 풋프린트의 3D 모델 경로는 실제 STEP 파일의 절대경로로 자동 보정하고, 공백이 포함된 경로도 KiCad가 읽을 수 있도록 따옴표로 감쌉니다.
-- 이미 같은 대상 파일이 있으면 덮어쓰지 않고 중단합니다.
-- 라이브러리 연결 상태 표에서 선택한 항목을 삭제하면 심볼 블록과 라이브러리 내부에 있는 연결 footprint/3D 모델 파일을 함께 정리합니다.
-- `폴더 일괄 추가`로 선택한 폴더 안의 ZIP 파일들을 순서대로 추가하고, 각 ZIP의 성공/실패 결과를 표로 확인할 수 있습니다.
-- `감시 시작`을 누르면 실행파일 옆의 `incoming_zips` 폴더를 감시합니다. ZIP 파일이 들어오면 자동으로 추가하고 `processed_zips` 폴더로 이동해 백업합니다.
-- 최소화하면 작업표시줄에서 숨겨지고 시스템 트레이에서 계속 실행됩니다.
-- 시스템 트레이 메뉴에서 창 열기, 감시 시작/중지, Windows 시작 시 자동 실행, 종료를 사용할 수 있습니다.
-- 라이브러리 추가가 완료되면 시스템 알림을 표시합니다.
-- 마지막으로 선택한 라이브러리 폴더는 `%APPDATA%\KiCadPartsCollector\settings.json`에 저장되어 다음 실행 때 자동으로 복원됩니다.
-- `도움말 > 업데이트 확인`으로 GitHub Releases에 올라온 최신 실행파일을 설치할 수 있습니다.
+3. `v버전` 형식의 Git 태그를 만듭니다.
+4. GitHub Release를 생성합니다.
+5. `dist\KiCadPartsCollector.exe`를 Release asset으로 업로드합니다.
 
 ## 테스트
 
 ```powershell
 python -m unittest discover -s tests
 ```
+
+## 상태 파일
+
+사용자 설정은 Windows 사용자 프로필 아래에 저장됩니다.
+
+```text
+%APPDATA%\KiCadPartsCollector\settings.json
+```
+
+저장되는 주요 설정은 마지막 라이브러리 위치, 테마, 수신 폴더, 백업 폴더입니다.
+
+## 참고
+
+이 앱은 사내 KiCad 라이브러리를 일정한 구조로 유지하는 업무용 도구입니다. 라이브러리에 추가하기 전에는 `미리보기`와 연결 상태 표를 통해 대상 파일과 연결 상태를 확인하는 것을 권장합니다.
