@@ -8,6 +8,18 @@ from kicad_parts_collectors.version import APP_VERSION
 datas = [('assets/app_icon.png', 'assets'), ('assets/app_icon.ico', 'assets')]
 binaries = []
 hiddenimports = []
+if sys.platform == 'win32':
+    tcl_root = Path(sys.base_prefix) / 'tcl'
+    tcl_data = tcl_root / 'tcl8.6'
+    tk_data = tcl_root / 'tk8.6'
+    if tcl_data.exists():
+        datas.append((str(tcl_data), '_tcl_data'))
+    if tk_data.exists():
+        datas.append((str(tk_data), '_tk_data'))
+    for support_dir in ('tcl8', 'dde1.4', 'reg1.3'):
+        source = tcl_root / support_dir
+        if source.exists():
+            datas.append((str(source), support_dir))
 for package in ('tkinterdnd2', 'ttkbootstrap', 'pystray', 'easyeda2kicad'):
     try:
         tmp_ret = collect_all(package)
