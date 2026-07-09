@@ -264,6 +264,47 @@ class CollectorTests(unittest.TestCase):
             self.assertTrue(entries[0].footprint_ok)
             self.assertTrue(entries[0].model_ok)
 
+    def test_scan_library_reads_easyeda_multiline_properties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics.pretty"
+            model_path = library_root / "3dmodels" / "SOIC.step"
+            footprint_library.mkdir()
+            model_path.parent.mkdir()
+            model_path.write_text("step")
+            symbol_library.write_text(
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "EasyEdaPart" (in_bom yes) (on_board yes)\n'
+                '    (property\n'
+                '      "Value"\n'
+                '      "ADM3055EBRIZ-RL"\n'
+                '      (at 0 -16.51 0)\n'
+                '    )\n'
+                '    (property\n'
+                '      "Footprint"\n'
+                '      "hrobotics:SOIC-20_L15.4-W7.5-P1.27-LS10.3-BL"\n'
+                '      (at 0 -19.05 0)\n'
+                '    )\n'
+                '  )\n'
+                ')\n'
+            )
+            (footprint_library / "SOIC-20_L15.4-W7.5-P1.27-LS10.3-BL.kicad_mod").write_text(
+                f'(module easyeda2kicad:SOIC-20_L15.4-W7.5-P1.27-LS10.3-BL (layer F.Cu)\n'
+                f'  (model "{model_path.resolve().as_posix()}")\n'
+                f')\n'
+            )
+
+            entries = scan_library(library_root)
+
+            self.assertEqual(1, len(entries))
+            self.assertEqual("ADM3055EBRIZ-RL", entries[0].value)
+            self.assertEqual("hrobotics:SOIC-20_L15.4-W7.5-P1.27-LS10.3-BL", entries[0].footprint)
+            self.assertTrue(entries[0].footprint_ok)
+            self.assertTrue(entries[0].model_ok)
+
     def test_update_library_entry_edits_properties_and_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

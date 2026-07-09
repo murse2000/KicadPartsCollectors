@@ -50,6 +50,16 @@ class WatchFolders:
     processed: Path
 
 
+@dataclass(frozen=True)
+class _PropertyEntry:
+    name: str
+    value: str
+    start: int
+    end: int
+    value_start: int
+    value_end: int
+
+
 class CollectorError(Exception):
     pass
 
@@ -872,49 +882,24 @@ def _link_symbol_block_footprint(block: str, footprint_references: dict[str, str
 
 
 def _property_value(text: str, property_name: str) -> str | None:
-    marker = f'(property "{property_name}" "'
-    start = text.find(marker)
-    if start < 0:
-        return None
-
-    start += len(marker)
-    end = _quoted_value_end(text, start)
-    return text[start:end]
+    for entry in _property_entries(text):
+        if entry.name == property_name:
+            return entry.value
+    return None
 
 
 def _property_values(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    index = 0
-    marker = '(property "'
-    while True:
-        start = text.find(marker, index)
-        if start < 0:
-            return values
-
-        name_start = start + len(marker)
-        name_end = _quoted_value_end(text, name_start)
-        value_marker_start = name_end + 1
-        while value_marker_start < len(text) and text[value_marker_start].isspace():
-            value_marker_start += 1
-        if value_marker_start >= len(text) or text[value_marker_start] != '"':
-            index = name_end + 1
-            continue
-
-        value_start = value_marker_start + 1
-        value_end = _quoted_value_end(text, value_start)
-        values[text[name_start:name_end]] = text[value_start:value_end]
-        index = value_end + 1
+    for entry in _property_entries(text):
+        values[entry.name] = entry.value
+    return values
 
 
 def _replace_property_value(text: str, property_name: str, value: str) -> str:
-    marker = f'(property "{property_name}" "'
-    start = text.find(marker)
-    if start < 0:
-        return text
-
-    start += len(marker)
-    end = _quoted_value_end(text, start)
-    return text[:start] + _escape_symbol_value(value) + text[end:]
+    for entry in _property_entries(text):
+        if entry.name == property_name:
+            return text[:entry.value_start] + _escape_symbol_value(value) + text[entry.value_end:]
+    return text
 
 
 def _upsert_property_value(text: str, property_name: str, value: str) -> str:
@@ -932,13 +917,47 @@ def _upsert_property_value(text: str, property_name: str, value: str) -> str:
 
 
 def _remove_property(text: str, property_name: str) -> str:
-    marker = f'(property "{property_name}" '
-    start = text.find(marker)
-    if start < 0:
-        return text
+    for entry in _property_entries(text):
+        if entry.name != property_name:
+            continue
 
-    line_start = text.rfind("\n", 0, start)
-    line_start = 0 if line_start < 0 else line_start
+        line_start = text.rfind("\n", 0, entry.start)
+        line_start = 0 if line_start < 0 else line_start
+        end = entry.end
+        if end < len(text) and text[end] == "\n":
+            end += 1
+        return text[:line_start] + text[end:]
+
+    return text
+
+
+def _property_entries(text: str) -> list[_PropertyEntry]:
+    entries: list[_PropertyEntry] = []
+    index = 0
+    while True:
+        start = text.find("(property", index)
+        if start < 0:
+            return entries
+
+        end = _sexpr_end(text, start)
+        quoted_values = _quoted_spans(text, start, end)
+        if len(quoted_values) >= 2:
+            name_start, name_end = quoted_values[0]
+            value_start, value_end = quoted_values[1]
+            entries.append(
+                _PropertyEntry(
+                    text[name_start:name_end],
+                    text[value_start:value_end],
+                    start,
+                    end,
+                    value_start,
+                    value_end,
+                )
+            )
+        index = end
+
+
+def _sexpr_end(text: str, start: int) -> int:
     depth = 0
     in_string = False
     escaped = False
@@ -960,12 +979,25 @@ def _remove_property(text: str, property_name: str) -> str:
         elif char == ")":
             depth -= 1
             if depth == 0:
-                end = index + 1
-                if end < len(text) and text[end] == "\n":
-                    end += 1
-                return text[:line_start] + text[end:]
+                return index + 1
 
-    raise CollectorError("심볼 속성을 삭제할 범위를 찾지 못했습니다.")
+    raise CollectorError("심볼 속성 범위를 해석하지 못했습니다.")
+
+
+def _quoted_spans(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    index = start
+    while index < end:
+        if text[index] != '"':
+            index += 1
+            continue
+
+        value_start = index + 1
+        value_end = _quoted_value_end(text, value_start)
+        spans.append((value_start, value_end))
+        index = value_end + 1
+
+    return spans
 
 
 def _write_footprint_model(footprint_path: Path, model: str) -> None:
