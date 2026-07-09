@@ -14,6 +14,7 @@ from .collector import (
     CollectorError,
     build_install_plan,
     ensure_watch_folders,
+    import_easyeda_query,
     install_zip,
     install_zip_directory,
     process_watch_folder,
@@ -272,6 +273,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.app_settings = app_settings
         self.zip_path = tk.StringVar()
         self.library_root = tk.StringVar(value=self.app_settings.library_root)
+        self.easyeda_query = tk.StringVar()
         self.theme_name = tk.StringVar(value=initial_theme)
         self.status = tk.StringVar(value="ZIP 파일과 사내 라이브러리 위치를 선택하세요.")
         self.symbol_count = tk.StringVar(value="0")
@@ -471,6 +473,12 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.preview_button.pack(side=tk.LEFT, ipadx=8)
         self.install_button = ttk.Button(actions, text="라이브러리에 추가", style="Primary.TButton", command=self._install)
         self.install_button.pack(side=tk.LEFT, padx=(6, 0), ipadx=8)
+
+        ttk.Label(form, text="LCSC/Mouser", style="Toolbar.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=(8, 0))
+        self.easyeda_entry = ttk.Entry(form, textvariable=self.easyeda_query)
+        self.easyeda_entry.grid(row=1, column=1, columnspan=4, sticky="ew", padx=(0, 6), pady=(8, 0), ipady=3)
+        self.easyeda_button = ttk.Button(form, text="EasyEDA에서 가져오기", style="Secondary.TButton", command=self._import_easyeda)
+        self.easyeda_button.grid(row=1, column=5, columnspan=2, sticky="ew", pady=(8, 0))
 
         content = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         content.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
@@ -702,6 +710,26 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             return
         self._run_job(self._install_job)
 
+    def _import_easyeda(self) -> None:
+        query = self.easyeda_query.get().strip()
+        if not query:
+            messagebox.showerror("확인 필요", "LCSC 번호, Mouser 번호 또는 제조사 부품번호를 입력하세요.")
+            return
+
+        library_root = Path(self.library_root.get())
+        if not library_root.exists() or not library_root.is_dir():
+            messagebox.showerror("확인 필요", "존재하는 라이브러리 폴더를 선택하세요.")
+            return
+
+        if not messagebox.askyesno("EasyEDA 가져오기", f"{query} 부품을 EasyEDA/JLCPCB에서 가져올까요?"):
+            return
+
+        self._save_current_settings()
+        self.status.set(f"EasyEDA 검색 중: {query}")
+        self._set_busy(True)
+        thread = threading.Thread(target=self._easyeda_import_job, args=(query, library_root), daemon=True)
+        thread.start()
+
     def _choose_and_install_directory(self) -> None:
         try:
             library_root = Path(self.library_root.get())
@@ -884,6 +912,13 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         try:
             results = install_zip_directory(zip_directory, library_root)
             self.after(0, self._show_batch_results, results)
+        except CollectorError as exc:
+            self.after(0, self._show_error, exc)
+
+    def _easyeda_import_job(self, query: str, library_root: Path) -> None:
+        try:
+            items = import_easyeda_query(query, library_root)
+            self.after(0, self._show_items, f"EasyEDA 가져오기 완료: {query}", items)
         except CollectorError as exc:
             self.after(0, self._show_error, exc)
 
@@ -1148,6 +1183,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.zip_entry.configure(state=state)
         self.library_entry.configure(state=state)
         self.library_button.configure(state=state)
+        self.easyeda_entry.configure(state=state)
+        self.easyeda_button.configure(state=state)
         self.preview_button.configure(state=state)
         self.install_button.configure(state=state)
         self.refresh_button.configure(state=state)

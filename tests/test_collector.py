@@ -5,6 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import kicad_parts_collectors.collector as collector
 from kicad_parts_collectors.collector import (
     CollectorError,
     build_install_plan,
@@ -427,6 +428,50 @@ class CollectorTests(unittest.TestCase):
             self.assertFalse(zip_path.exists())
             self.assertTrue((processed / "Auto.zip").exists())
             self.assertTrue((footprint_library / "Auto.kicad_mod").exists())
+
+    def test_process_watch_folder_imports_easyeda_id_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            incoming = root / "incoming_zips"
+            processed = root / "processed_zips"
+            library_root = root / "library"
+            incoming.mkdir()
+            processed.mkdir()
+            library_root.mkdir()
+            id_file = incoming / "mouser_parts.txt"
+            id_file.write_text("C2040\n# ignored\n511-STM32L432KBU6\n")
+            calls: list[str] = []
+            original_import = collector.import_easyeda_query
+
+            def fake_import(query: str, target_library: Path) -> list[collector.InstallItem]:
+                calls.append(query)
+                return [collector.InstallItem(query, target_library / f"{query}.kicad_sym", "symbol")]
+
+            try:
+                collector.import_easyeda_query = fake_import
+                results = process_watch_folder(library_root, WatchFolders(incoming, processed))
+            finally:
+                collector.import_easyeda_query = original_import
+
+            self.assertEqual(["C2040", "511-STM32L432KBU6"], calls)
+            self.assertEqual(1, len(results))
+            self.assertTrue(results[0].ok)
+            self.assertFalse(id_file.exists())
+            self.assertTrue((processed / "mouser_parts.txt").exists())
+
+    def test_part_number_candidates_include_mouser_tail(self) -> None:
+        self.assertEqual(
+            ["511-STM32L432KBU6", "STM32L432KBU6"],
+            collector._part_number_candidates("511-STM32L432KBU6"),
+        )
+
+    def test_best_lcsc_match_prefers_exact_model(self) -> None:
+        results = [
+            {"lcsc": "C111", "model": "STM32L432KCU6", "name": "near match"},
+            {"lcsc": "C94784", "model": "STM32L432KBU6", "name": "exact match"},
+        ]
+
+        self.assertEqual("C94784", collector._best_lcsc_match("STM32L432KBU6", results))
 
     def test_existing_file_blocks_install(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

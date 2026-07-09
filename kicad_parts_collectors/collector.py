@@ -3,8 +3,10 @@ from __future__ import annotations
 import shutil
 import sys
 import zipfile
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,114 @@ def install_zip(zip_path: Path, library_root: Path) -> list[InstallItem]:
     return items
 
 
+def import_easyeda_component(lcsc_id: str, library_root: Path) -> list[InstallItem]:
+    lcsc_id = lcsc_id.strip()
+    if not lcsc_id or not lcsc_id.startswith("C"):
+        raise CollectorError("EasyEDA 가져오기는 C로 시작하는 LCSC ID가 필요합니다. 예: C2040")
+
+    try:
+        from easyeda2kicad.easyeda.easyeda_api import EasyedaApi
+        from easyeda2kicad.easyeda.easyeda_importer import (
+            Easyeda3dModelImporter,
+            EasyedaFootprintImporter,
+            EasyedaSymbolImporter,
+        )
+        from easyeda2kicad.kicad.export_kicad_3d_model import Exporter3dModelKicad
+        from easyeda2kicad.kicad.export_kicad_footprint import ExporterFootprintKicad
+        from easyeda2kicad.kicad.export_kicad_symbol import ExporterSymbolKicad
+    except ImportError as exc:
+        raise CollectorError("EasyEDA 가져오기 모듈을 찾지 못했습니다. requirements를 다시 설치하세요.") from exc
+
+    library_root = Path(library_root)
+    symbol_library = _symbol_library_for(library_root)
+    footprint_library = _footprint_library_for(library_root)
+    model_directory = library_root / "3dmodels"
+
+    api = EasyedaApi(use_cache=False)
+    cad_data = api.get_cad_data_of_component(lcsc_id=lcsc_id)
+    if not cad_data:
+        raise CollectorError(f"EasyEDA에서 부품 데이터를 찾지 못했습니다: {lcsc_id}")
+
+    easyeda_symbol = EasyedaSymbolImporter(easyeda_cp_cad_data=cad_data).get_symbol()
+    easyeda_footprint = EasyedaFootprintImporter(easyeda_cp_cad_data=cad_data).get_footprint()
+    footprint_path = footprint_library / f"{easyeda_footprint.info.name}.kicad_mod"
+    footprint_exists = footprint_path.exists()
+
+    symbol_exporter = ExporterSymbolKicad(
+        symbol=easyeda_symbol,
+        lib_path=str(symbol_library),
+        custom_fields={"LCSC": lcsc_id},
+    )
+    symbol_exporter.save_to_lib(
+        lib_path=str(symbol_library),
+        footprint_lib_name=footprint_library.stem,
+        overwrite=False,
+    )
+
+    model_items: list[InstallItem] = []
+    model_exporter = Exporter3dModelKicad(
+        model_3d=Easyeda3dModelImporter(
+            easyeda_cp_cad_data=cad_data,
+            download_raw_3d_model=True,
+            api=api,
+        ).output,
+    )
+    if model_exporter.output and model_exporter.export(output_dir=str(model_directory), overwrite=False):
+        model_items.append(InstallItem(lcsc_id, model_directory / f"{model_exporter.output.name}.wrl", "3d_model"))
+        if model_exporter.output_step:
+            model_items.append(InstallItem(lcsc_id, model_directory / f"{model_exporter.output.name}.step", "3d_model"))
+
+    if not footprint_exists:
+        ExporterFootprintKicad(footprint=easyeda_footprint).export(
+            footprint_full_path=str(footprint_path),
+            model_3d_path=model_directory.as_posix(),
+        )
+
+    return [
+        InstallItem(lcsc_id, symbol_library, "symbol"),
+        InstallItem(lcsc_id, footprint_path, "footprint"),
+        *model_items,
+    ]
+
+
+def import_easyeda_query(query: str, library_root: Path) -> list[InstallItem]:
+    lcsc_id = resolve_easyeda_lcsc_id(query)
+    return import_easyeda_component(lcsc_id, library_root)
+
+
+def resolve_easyeda_lcsc_id(query: str) -> str:
+    query = query.strip()
+    if not query:
+        raise CollectorError("가져올 마우저/제조사 부품번호 또는 LCSC ID를 입력하세요.")
+    if re.fullmatch(r"C\d+", query, re.IGNORECASE):
+        return query.upper()
+
+    try:
+        from easyeda2kicad.easyeda.easyeda_api import EasyedaApi
+    except ImportError as exc:
+        raise CollectorError("EasyEDA 검색 모듈을 찾지 못했습니다. requirements를 다시 설치하세요.") from exc
+
+    api = EasyedaApi(use_cache=False)
+    all_results: list[dict[str, Any]] = []
+    for candidate in _part_number_candidates(query):
+        search_result = api.search_jlcpcb_components(candidate, page_size=20)
+        results = search_result.get("results") or []
+        if results:
+            match = _best_lcsc_match(candidate, results)
+            if match:
+                return match
+            all_results.extend(results)
+
+    fallback = _best_lcsc_match(query, all_results)
+    if fallback:
+        return fallback
+
+    raise CollectorError(
+        f"EasyEDA/JLCPCB에서 부품번호를 찾지 못했습니다: {query}\n"
+        "마우저 자체 품번이면 제조사 부품번호(MPN) 또는 LCSC ID(C로 시작)를 입력해 보세요."
+    )
+
+
 def install_zip_directory(zip_directory: Path, library_root: Path) -> list[BatchInstallResult]:
     zip_directory = Path(zip_directory)
     if not zip_directory.exists() or not zip_directory.is_dir():
@@ -151,17 +261,20 @@ def ensure_watch_folders(base_directory: Path | None = None) -> WatchFolders:
 
 def process_watch_folder(library_root: Path, folders: WatchFolders) -> list[BatchInstallResult]:
     results: list[BatchInstallResult] = []
-    for zip_path in sorted(folders.incoming.glob("*.zip")):
-        if not _is_stable_file(zip_path):
+    for package_path in _watch_candidates(folders.incoming):
+        if package_path.suffix.lower() == ".zip" and not _is_stable_file(package_path):
             continue
 
         try:
-            items = install_zip(zip_path, library_root)
-            results.append(BatchInstallResult(zip_path, True, "자동 추가 완료", len(items)))
-            _move_to_processed(zip_path, folders.processed, False)
+            if _is_easyeda_id_file(package_path):
+                items = _import_easyeda_id_file(package_path, library_root)
+            else:
+                items = install_zip(package_path, library_root)
+            results.append(BatchInstallResult(package_path, True, "자동 추가 완료", len(items)))
+            _move_to_processed(package_path, folders.processed, False)
         except Exception as exc:
-            results.append(BatchInstallResult(zip_path, False, str(exc), 0))
-            _move_to_processed(zip_path, folders.processed, True)
+            results.append(BatchInstallResult(package_path, False, str(exc), 0))
+            _move_to_processed(package_path, folders.processed, True)
 
     return results
 
@@ -387,6 +500,94 @@ def _move_to_processed(zip_path: Path, processed_directory: Path, failed: bool) 
         destination = processed_directory / f"{zip_path.stem}{suffix}_{_timestamp()}{zip_path.suffix}"
 
     return zip_path.rename(destination)
+
+
+def _watch_candidates(incoming_directory: Path) -> list[Path]:
+    candidates: list[Path] = []
+    for path in sorted(incoming_directory.iterdir()):
+        if path.name.startswith(".") or path.name == "__MACOSX":
+            continue
+        if path.is_file() and (path.suffix.lower() == ".zip" or _is_easyeda_id_file(path)):
+            candidates.append(path)
+
+    return candidates
+
+
+def _is_easyeda_id_file(path: Path) -> bool:
+    return path.is_file() and (
+        path.name.lower() in {"easyeda_ids.txt", "lcsc_ids.txt", "easyeda_parts.txt", "mouser_parts.txt"}
+        or path.suffix.lower() in {".lcsc", ".parts"}
+    )
+
+
+def _import_easyeda_id_file(path: Path, library_root: Path) -> list[InstallItem]:
+    queries: list[str] = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        value = line.split("#", 1)[0].strip()
+        if value:
+            queries.append(value)
+
+    if not queries:
+        raise CollectorError("EasyEDA로 가져올 부품번호가 비어 있습니다.")
+
+    items: list[InstallItem] = []
+    for query in queries:
+        items.extend(import_easyeda_query(query, library_root))
+
+    return items
+
+
+def _part_number_candidates(query: str) -> list[str]:
+    raw = query.strip()
+    candidates = [raw]
+    for separator in (" ", "\t", "/", "\\"):
+        if separator in raw:
+            candidates.append(raw.rsplit(separator, 1)[-1].strip())
+
+    if "-" in raw:
+        parts = [part.strip() for part in raw.split("-") if part.strip()]
+        for index in range(1, len(parts)):
+            candidates.append("-".join(parts[index:]))
+        candidates.append(parts[-1])
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = candidate.strip()
+        key = normalized.upper()
+        if normalized and key not in seen:
+            unique.append(normalized)
+            seen.add(key)
+
+    return unique
+
+
+def _best_lcsc_match(query: str, results: list[dict[str, Any]]) -> str | None:
+    if not results:
+        return None
+
+    normalized_query = _normalize_part_number(query)
+    for result in results:
+        for field in ("lcsc", "model", "name"):
+            if _normalize_part_number(str(result.get(field, ""))) == normalized_query:
+                lcsc = str(result.get("lcsc", "")).strip()
+                if lcsc:
+                    return lcsc.upper()
+
+    for result in results:
+        model = _normalize_part_number(str(result.get("model", "")))
+        name = _normalize_part_number(str(result.get("name", "")))
+        if normalized_query and (normalized_query in model or normalized_query in name):
+            lcsc = str(result.get("lcsc", "")).strip()
+            if lcsc:
+                return lcsc.upper()
+
+    lcsc = str(results[0].get("lcsc", "")).strip()
+    return lcsc.upper() if lcsc else None
+
+
+def _normalize_part_number(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", value.upper())
 
 
 def _timestamp() -> str:
