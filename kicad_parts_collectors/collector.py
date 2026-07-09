@@ -334,6 +334,16 @@ def scan_library(library_root: Path) -> list[LibraryEntry]:
     return entries
 
 
+def add_missing_lcsc_properties(library_root: Path) -> int:
+    library_root = Path(library_root)
+    symbol_library = _symbol_library_for(library_root)
+    text = symbol_library.read_text(encoding="utf-8-sig")
+    updated_text, count = _ensure_symbol_property(text, "LCSC", "")
+    if count:
+        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+    return count
+
+
 def update_library_entry(
     library_root: Path,
     symbol: str,
@@ -681,6 +691,7 @@ def _ensure_new_symbols(source_bytes: bytes, destination: Path) -> None:
 
 def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_references: dict[str, str]) -> None:
     source_text = _link_symbol_footprints(source_bytes.decode("utf-8-sig"), footprint_references)
+    source_text, _count = _ensure_symbol_property(source_text, "LCSC", "")
     destination_text = destination.read_text(encoding="utf-8-sig")
     symbol_blocks = _symbol_blocks(source_text)
     if not symbol_blocks:
@@ -914,6 +925,20 @@ def _upsert_property_value(text: str, property_name: str, value: str) -> str:
 
     property_line = f'\n    (property "{property_name}" "{_escape_symbol_value(value)}" (at 0 0 0))'
     return text[:insert_at] + property_line + text[insert_at:]
+
+
+def _ensure_symbol_property(text: str, property_name: str, value: str) -> tuple[str, int]:
+    updated_text = text
+    count = 0
+    for block in _symbol_blocks(text):
+        if _property_value(block, property_name) is not None:
+            continue
+
+        updated_block = _upsert_property_value(block, property_name, value)
+        updated_text = updated_text.replace(block, updated_block, 1)
+        count += 1
+
+    return updated_text, count
 
 
 def _remove_property(text: str, property_name: str) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 import kicad_parts_collectors.collector as collector
 from kicad_parts_collectors.collector import (
     CollectorError,
+    add_missing_lcsc_properties,
     build_install_plan,
     install_zip,
     install_zip_directory,
@@ -91,10 +92,36 @@ class CollectorTests(unittest.TestCase):
             merged_symbol = symbol_library.read_text()
             self.assertIn('(symbol "Vendor"', merged_symbol)
             self.assertIn('(property "Footprint" "hrobotics_decal_library:Vendor"', merged_symbol)
+            self.assertIn('(property "LCSC" ""', merged_symbol)
             footprint = (footprint_library / "Vendor.kicad_mod").read_text()
             self.assertIn('(footprint "Vendor"', footprint)
             self.assertIn(f'(model "{(library_root / "3dmodels" / "Vendor.step").resolve().as_posix()}"', footprint)
             self.assertEqual("step", (library_root / "3dmodels" / "Vendor.step").read_text())
+
+    def test_add_missing_lcsc_properties_updates_existing_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            symbol_library.write_text(
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "MissingLcsc" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "MissingLcsc" (at 0 0 0))\n'
+                '  )\n'
+                '  (symbol "ExistingLcsc" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "ExistingLcsc" (at 0 0 0))\n'
+                '    (property "LCSC" "C123" (at 0 0 0))\n'
+                '  )\n'
+                ')\n'
+            )
+
+            count = add_missing_lcsc_properties(library_root)
+
+            updated = symbol_library.read_text()
+            self.assertEqual(1, count)
+            self.assertIn('(property "LCSC" ""', updated)
+            self.assertEqual(1, updated.count('(property "LCSC" "C123"'))
 
     def test_ultra_librarian_package_uses_part_folder_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
