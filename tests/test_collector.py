@@ -140,13 +140,14 @@ class CollectorTests(unittest.TestCase):
                 ')\n'
             )
             original_resolver = collector.resolve_easyeda_lcsc_id_exact
+            progresses: list[collector.LcscUpdateProgress] = []
 
             def fake_resolver(query: str) -> str | None:
                 return "C94784" if query == "STM32L432KBU6" else None
 
             try:
                 collector.resolve_easyeda_lcsc_id_exact = fake_resolver
-                result = collector.fill_missing_lcsc_properties(library_root)
+                result = collector.fill_missing_lcsc_properties(library_root, progresses.append)
             finally:
                 collector.resolve_easyeda_lcsc_id_exact = original_resolver
 
@@ -155,6 +156,8 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(1, result.filled)
             self.assertIn('(property "LCSC" "C94784"', updated)
             self.assertEqual(1, updated.count('(property "LCSC" ""'))
+            self.assertEqual((0, 2), (progresses[0].current, progresses[0].total))
+            self.assertEqual((2, 2), (progresses[-1].current, progresses[-1].total))
 
     def test_install_zip_can_fill_lcsc_for_new_symbol(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

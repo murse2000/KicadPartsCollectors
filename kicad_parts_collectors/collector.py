@@ -6,7 +6,7 @@ import zipfile
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,15 @@ class RemovalResult:
 
 @dataclass(frozen=True)
 class LcscUpdateResult:
+    added: int
+    filled: int
+
+
+@dataclass(frozen=True)
+class LcscUpdateProgress:
+    current: int
+    total: int
+    symbol: str
     added: int
     filled: int
 
@@ -371,11 +380,14 @@ def add_missing_lcsc_properties(library_root: Path) -> int:
     return count
 
 
-def fill_missing_lcsc_properties(library_root: Path) -> LcscUpdateResult:
+def fill_missing_lcsc_properties(
+    library_root: Path,
+    progress_callback: Callable[[LcscUpdateProgress], None] | None = None,
+) -> LcscUpdateResult:
     library_root = Path(library_root)
     symbol_library = _symbol_library_for(library_root)
     text = symbol_library.read_text(encoding="utf-8-sig")
-    updated_text, result = _fill_lcsc_properties(text)
+    updated_text, result = _fill_lcsc_properties(text, progress_callback)
     if result.added or result.filled:
         symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
     return result
@@ -997,16 +1009,27 @@ def _add_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
     return updated_text, LcscUpdateResult(added=count, filled=0)
 
 
-def _fill_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
+def _fill_lcsc_properties(
+    text: str,
+    progress_callback: Callable[[LcscUpdateProgress], None] | None = None,
+) -> tuple[str, LcscUpdateResult]:
     updated_text = text
     added = 0
     filled = 0
+    pending_blocks = []
     for block in _symbol_blocks(text):
+        lcsc = _property_value(block, "LCSC")
+        if not lcsc:
+            pending_blocks.append(block)
+
+    total = len(pending_blocks)
+    if progress_callback is not None:
+        progress_callback(LcscUpdateProgress(0, total, "", 0, 0))
+
+    for index, block in enumerate(pending_blocks, start=1):
         symbol_name = _symbol_name(block) or ""
         properties = _property_values(block)
         lcsc = properties.get("LCSC")
-        if lcsc:
-            continue
 
         updated_block = block if lcsc is not None else _upsert_property_value(block, "LCSC", "")
         if lcsc is None:
@@ -1018,6 +1041,8 @@ def _fill_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
             filled += 1
 
         updated_text = updated_text.replace(block, updated_block, 1)
+        if progress_callback is not None:
+            progress_callback(LcscUpdateProgress(index, total, symbol_name, added, filled))
 
     return updated_text, LcscUpdateResult(added=added, filled=filled)
 

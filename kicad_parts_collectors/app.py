@@ -16,6 +16,7 @@ from .collector import (
     build_install_plan,
     ensure_watch_folders,
     fill_missing_lcsc_properties,
+    LcscUpdateProgress,
     import_easyeda_query,
     install_zip,
     install_zip_directory,
@@ -326,6 +327,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.tray_hidden = False
         self.quitting = False
         self.library_resize_job = None
+        self.lcsc_progress_window = None
 
         self._set_window_icon()
         self.dnd_enabled = self._enable_drag_and_drop()
@@ -1205,15 +1207,85 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         ):
             return
 
+        self.status.set("LCSC 자동 채우기 진행 중입니다.")
+        self._set_busy(True)
+        self._open_lcsc_progress_window()
+        thread = threading.Thread(target=self._fill_missing_lcsc_properties_job, args=(library_root,), daemon=True)
+        thread.start()
+
+    def _fill_missing_lcsc_properties_job(self, library_root: Path) -> None:
         try:
-            result = fill_missing_lcsc_properties(library_root)
-        except CollectorError as exc:
-            messagebox.showerror("처리 실패", str(exc))
+            result = fill_missing_lcsc_properties(
+                library_root,
+                lambda progress: self.after(0, self._update_lcsc_progress_window, progress),
+            )
+        except Exception as exc:
+            self.after(0, self._finish_lcsc_progress_with_error, exc)
             return
 
+        self.after(0, self._finish_lcsc_progress, result)
+
+    def _open_lcsc_progress_window(self) -> None:
+        if self.lcsc_progress_window is not None and self.lcsc_progress_window.winfo_exists():
+            self.lcsc_progress_window.destroy()
+
+        window = tk.Toplevel(self)
+        window.title("LCSC 자동 채우기")
+        window.resizable(False, False)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        frame = ttk.Frame(window, padding=16)
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+
+        self.lcsc_progress_title = tk.StringVar(value="EasyEDA/JLCPCB에서 정확 매칭 검색 중입니다.")
+        self.lcsc_progress_count = tk.StringVar(value="준비 중")
+        self.lcsc_progress_symbol = tk.StringVar(value="")
+        self.lcsc_progress_result = tk.StringVar(value="값 입력 0개 / 빈 속성 추가 0개")
+
+        ttk.Label(frame, textvariable=self.lcsc_progress_title, style="Field.TLabel").grid(row=0, column=0, sticky="w")
+        self.lcsc_progress_bar = ttk.Progressbar(frame, mode="determinate", maximum=1, length=420)
+        self.lcsc_progress_bar.grid(row=1, column=0, sticky="ew", pady=(12, 6))
+        ttk.Label(frame, textvariable=self.lcsc_progress_count, style="Muted.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(frame, textvariable=self.lcsc_progress_symbol, style="Muted.TLabel").grid(row=3, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(frame, textvariable=self.lcsc_progress_result, style="Muted.TLabel").grid(row=4, column=0, sticky="w", pady=(4, 0))
+
+        window.update_idletasks()
+        x = self.winfo_rootx() + max((self.winfo_width() - window.winfo_width()) // 2, 0)
+        y = self.winfo_rooty() + max((self.winfo_height() - window.winfo_height()) // 2, 0)
+        window.geometry(f"+{x}+{y}")
+        self.lcsc_progress_window = window
+
+    def _update_lcsc_progress_window(self, progress: LcscUpdateProgress) -> None:
+        if self.lcsc_progress_window is None or not self.lcsc_progress_window.winfo_exists():
+            return
+
+        total = max(progress.total, 1)
+        self.lcsc_progress_bar.configure(maximum=total)
+        self.lcsc_progress_bar["value"] = progress.current
+        self.lcsc_progress_count.set(f"{progress.current} / {progress.total}")
+        self.lcsc_progress_symbol.set(f"현재 심볼: {progress.symbol}" if progress.symbol else "검색 대상 확인 중")
+        self.lcsc_progress_result.set(f"값 입력 {progress.filled}개 / 빈 속성 추가 {progress.added}개")
+        self.status.set(f"LCSC 자동 채우기 진행 중: {progress.current}/{progress.total}")
+
+    def _finish_lcsc_progress(self, result) -> None:
+        self._close_lcsc_progress_window()
+        self._set_busy(False)
         self.status.set(f"LCSC 자동 채우기 완료: 값 입력 {result.filled}개 / 빈 속성 추가 {result.added}개")
         messagebox.showinfo("완료", f"LCSC 값을 채운 심볼: {result.filled}개\n빈 LCSC 속성을 추가한 심볼: {result.added}개")
         self._refresh_library_view()
+
+    def _finish_lcsc_progress_with_error(self, error: Exception) -> None:
+        self._close_lcsc_progress_window()
+        self._set_busy(False)
+        self.status.set("LCSC 자동 채우기 실패")
+        messagebox.showerror("처리 실패", str(error))
+
+    def _close_lcsc_progress_window(self) -> None:
+        if self.lcsc_progress_window is not None and self.lcsc_progress_window.winfo_exists():
+            self.lcsc_progress_window.destroy()
+        self.lcsc_progress_window = None
 
     def _change_theme(self, _event=None) -> None:
         theme = self.theme_name.get()
