@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,9 @@ class AppSettings:
 
 
 def settings_path() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "KiCadPartsCollector" / "settings.json"
+
     appdata = os.environ.get("APPDATA")
     if appdata:
         return Path(appdata) / "KiCadPartsCollector" / "settings.json"

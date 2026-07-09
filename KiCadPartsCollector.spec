@@ -1,20 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
+from kicad_parts_collectors.version import APP_VERSION
 
 datas = [('assets/app_icon.png', 'assets'), ('assets/app_icon.ico', 'assets')]
 binaries = []
 hiddenimports = []
-tmp_ret = collect_all('tkinterdnd2')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('ttkbootstrap')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('pystray')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-try:
-    tmp_ret = collect_all('easyeda2kicad')
-    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-except Exception:
-    pass
+for package in ('tkinterdnd2', 'ttkbootstrap', 'pystray', 'easyeda2kicad'):
+    try:
+        tmp_ret = collect_all(package)
+        datas += tmp_ret[0]
+        binaries += tmp_ret[1]
+        hiddenimports += tmp_ret[2]
+    except Exception:
+        pass
 
 
 a = Analysis(
@@ -32,24 +33,70 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='KiCadPartsCollector',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='assets/app_icon.ico',
-)
+if sys.platform == 'darwin':
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        name='KiCadPartsCollector',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        exclude_binaries=True,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon='assets/app_icon.icns' if Path('assets/app_icon.icns').exists() else None,
+    )
+
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='KiCadPartsCollector',
+    )
+
+    app = BUNDLE(
+        coll,
+        name='KiCadPartsCollector.app',
+        icon='assets/app_icon.icns' if Path('assets/app_icon.icns').exists() else None,
+        bundle_identifier='com.murse2000.KiCadPartsCollector',
+        info_plist={
+            'CFBundleName': 'KiCad Parts Collector',
+            'CFBundleDisplayName': 'KiCad Parts Collector',
+            'CFBundleShortVersionString': APP_VERSION,
+            'NSPrincipalClass': 'NSApplication',
+            'NSHighResolutionCapable': True,
+        },
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name='KiCadPartsCollector',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon='assets/app_icon.ico',
+    )

@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .version import GITHUB_OWNER, GITHUB_REPO, RELEASE_ASSET_NAME
+from .version import GITHUB_OWNER, GITHUB_REPO, RELEASE_ASSET_NAME, release_asset_names
 
 
 class UpdateError(Exception):
@@ -59,7 +59,8 @@ def fetch_latest_release() -> ReleaseInfo:
 
     asset = _release_asset(data.get("assets", []))
     if asset is None:
-        raise UpdateError(f"Release에서 {RELEASE_ASSET_NAME} 파일을 찾지 못했습니다.")
+        expected = ", ".join(release_asset_names())
+        raise UpdateError(f"Release에서 현재 운영체제용 파일을 찾지 못했습니다: {expected}")
 
     tag_name = str(data.get("tag_name", ""))
     return ReleaseInfo(
@@ -74,7 +75,7 @@ def fetch_latest_release() -> ReleaseInfo:
 def download_release_asset(asset: ReleaseAsset) -> Path:
     target_dir = Path(tempfile.gettempdir()) / f"KiCadPartsCollector_update_{uuid.uuid4().hex}"
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / RELEASE_ASSET_NAME
+    target = target_dir / asset.name
     request = urllib.request.Request(asset.url, headers={"User-Agent": "KiCadPartsCollector"})
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
@@ -87,8 +88,15 @@ def download_release_asset(asset: ReleaseAsset) -> Path:
 
 
 def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
+    if sys.platform == "darwin":
+        try:
+            subprocess.Popen(["open", str(downloaded_exe)])
+        except OSError as exc:
+            raise UpdateError(f"업데이트 파일을 열지 못했습니다: {exc}") from exc
+        return
+
     if sys.platform != "win32":
-        raise UpdateError("자동 교체 업데이트는 Windows 실행파일에서만 지원합니다.")
+        raise UpdateError("자동 교체 업데이트는 Windows와 macOS 패키지에서만 지원합니다.")
 
     script = Path(tempfile.gettempdir()) / "KiCadPartsCollector_update.cmd"
     app_dir = current_exe.parent
@@ -123,10 +131,11 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
     )
 
 
-def _release_asset(assets: list[dict]) -> ReleaseAsset | None:
-    exact_matches = [asset for asset in assets if str(asset.get("name", "")).lower() == RELEASE_ASSET_NAME.lower()]
-    exe_matches = [asset for asset in assets if str(asset.get("name", "")).lower().endswith(".exe")]
-    selected = (exact_matches or exe_matches or [None])[0]
+def _release_asset(assets: list[dict], platform: str | None = None) -> ReleaseAsset | None:
+    expected_names = tuple(name.lower() for name in release_asset_names(platform))
+    exact_matches = [asset for asset in assets if str(asset.get("name", "")).lower() in expected_names]
+    extension_matches = [asset for asset in assets if _asset_matches_platform(str(asset.get("name", "")), platform)]
+    selected = (exact_matches or extension_matches or [None])[0]
     if selected is None:
         return None
 
@@ -135,6 +144,16 @@ def _release_asset(assets: list[dict]) -> ReleaseAsset | None:
         url=str(selected.get("browser_download_url", "")),
         digest=str(selected.get("digest", "")),
     )
+
+
+def _asset_matches_platform(name: str, platform: str | None = None) -> bool:
+    lower_name = name.lower()
+    target = platform or sys.platform
+    if target == "darwin":
+        return lower_name.endswith((".dmg", ".app.zip"))
+    if target == "win32":
+        return lower_name.endswith(".exe")
+    return lower_name.endswith((".tar.gz", ".zip"))
 
 
 def _verify_digest(path: Path, digest: str) -> None:

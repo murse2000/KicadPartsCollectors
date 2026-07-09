@@ -245,6 +245,9 @@ def install_zip_directory(zip_directory: Path, library_root: Path) -> list[Batch
 
 def app_base_directory() -> Path:
     if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            return Path.home() / "Library" / "Application Support" / "KiCadPartsCollector"
+
         return Path(sys.executable).parent
 
     return Path(__file__).resolve().parents[1]

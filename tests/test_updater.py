@@ -14,17 +14,31 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(is_newer_version("1.0.10", "1.0.2"))
         self.assertFalse(is_newer_version("1.0.0", "1.0.0"))
 
-    def test_release_asset_prefers_named_exe(self) -> None:
+    def test_release_asset_prefers_named_windows_exe(self) -> None:
         asset = _release_asset(
             [
                 {"name": "Other.exe", "browser_download_url": "https://example.com/other.exe"},
                 {"name": "KiCadPartsCollector.exe", "browser_download_url": "https://example.com/app.exe", "digest": "sha256:abc"},
-            ]
+            ],
+            platform="win32",
         )
 
         self.assertIsNotNone(asset)
         self.assertEqual("KiCadPartsCollector.exe", asset.name)
         self.assertEqual("https://example.com/app.exe", asset.url)
+
+    def test_release_asset_prefers_named_macos_dmg(self) -> None:
+        asset = _release_asset(
+            [
+                {"name": "KiCadPartsCollector.exe", "browser_download_url": "https://example.com/app.exe"},
+                {"name": "KiCadPartsCollector.dmg", "browser_download_url": "https://example.com/app.dmg"},
+            ],
+            platform="darwin",
+        )
+
+        self.assertIsNotNone(asset)
+        self.assertEqual("KiCadPartsCollector.dmg", asset.name)
+        self.assertEqual("https://example.com/app.dmg", asset.url)
 
     def test_verify_digest_rejects_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

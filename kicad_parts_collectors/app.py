@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import tempfile
 import threading
 import tkinter as tk
 import sys
@@ -49,6 +50,7 @@ except ImportError:
 ERROR_ALREADY_EXISTS = 183
 INSTANCE_MUTEX_NAME = "Local\\KiCadPartsCollector"
 INSTANCE_MUTEX_HANDLE = None
+INSTANCE_LOCK_FILE = None
 
 
 AVAILABLE_THEMES = ("flatly", "cosmo", "litera", "minty", "pulse", "darkly", "superhero", "cyborg", "solar")
@@ -225,8 +227,27 @@ def _safe_autostart_enabled() -> bool:
 
 
 def _acquire_single_instance() -> bool:
-    global INSTANCE_MUTEX_HANDLE
+    global INSTANCE_MUTEX_HANDLE, INSTANCE_LOCK_FILE
     if sys.platform != "win32":
+        import fcntl
+
+        preferred_lock_dir = Path.home() / "Library" / "Application Support" / "KiCadPartsCollector"
+        fallback_lock_dir = Path(tempfile.gettempdir()) / "KiCadPartsCollector"
+        lock_dir = preferred_lock_dir if sys.platform == "darwin" else fallback_lock_dir
+        try:
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            lock_file = (lock_dir / "app.lock").open("w")
+        except OSError:
+            fallback_lock_dir.mkdir(parents=True, exist_ok=True)
+            lock_file = (fallback_lock_dir / "app.lock").open("w")
+
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            lock_file.close()
+            return False
+
+        INSTANCE_LOCK_FILE = lock_file
         return True
 
     handle = ctypes.windll.kernel32.CreateMutexW(None, True, INSTANCE_MUTEX_NAME)
@@ -242,8 +263,17 @@ def _acquire_single_instance() -> bool:
 
 
 def _release_single_instance() -> None:
-    global INSTANCE_MUTEX_HANDLE
-    if sys.platform != "win32" or INSTANCE_MUTEX_HANDLE is None:
+    global INSTANCE_MUTEX_HANDLE, INSTANCE_LOCK_FILE
+    if sys.platform != "win32":
+        if INSTANCE_LOCK_FILE is not None:
+            import fcntl
+
+            fcntl.flock(INSTANCE_LOCK_FILE, fcntl.LOCK_UN)
+            INSTANCE_LOCK_FILE.close()
+            INSTANCE_LOCK_FILE = None
+        return
+
+    if INSTANCE_MUTEX_HANDLE is None:
         return
 
     ctypes.windll.kernel32.ReleaseMutex(INSTANCE_MUTEX_HANDLE)
@@ -363,31 +393,39 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         selection = palette["selection"]
         entry_bg = palette["entry_bg"]
 
+        default_font = ("Apple SD Gothic Neo", 10) if sys.platform == "darwin" else ("Malgun Gothic", 10)
+        title_font = ("Apple SD Gothic Neo", 14, "bold") if sys.platform == "darwin" else ("Malgun Gothic", 14, "bold")
+        bold_font = ("Apple SD Gothic Neo", 10, "bold") if sys.platform == "darwin" else ("Malgun Gothic", 10, "bold")
+        count_font = ("Apple SD Gothic Neo", 11, "bold") if sys.platform == "darwin" else ("Malgun Gothic", 11, "bold")
+        small_bold_font = ("Apple SD Gothic Neo", 9, "bold") if sys.platform == "darwin" else ("Malgun Gothic", 9, "bold")
+        small_font = ("Apple SD Gothic Neo", 9) if sys.platform == "darwin" else ("Malgun Gothic", 9)
+        drop_title_font = ("Apple SD Gothic Neo", 12, "bold") if sys.platform == "darwin" else ("Malgun Gothic", 12, "bold")
+
         self.configure(bg=page_bg)
-        style.configure(".", font=("Malgun Gothic", 10), background=page_bg, foreground=text)
+        style.configure(".", font=default_font, background=page_bg, foreground=text)
         style.configure("TFrame", background=page_bg)
         style.configure("TLabel", background=page_bg, foreground=text)
-        style.configure("Title.TLabel", font=("Malgun Gothic", 14, "bold"), background=page_bg, foreground=text)
+        style.configure("Title.TLabel", font=title_font, background=page_bg, foreground=text)
         style.configure("Muted.TLabel", background=page_bg, foreground=muted)
         style.configure("Card.TFrame", background=card_bg, relief=tk.FLAT)
         style.configure("Toolbar.TFrame", background=page_bg, relief=tk.FLAT)
         style.configure("Status.TFrame", background=heading_bg, relief=tk.FLAT, borderwidth=1)
         style.configure("Drop.TFrame", background=soft_bg, relief=tk.FLAT)
-        style.configure("CardTitle.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=muted)
-        style.configure("Count.TLabel", font=("Malgun Gothic", 11, "bold"), background=card_bg, foreground=text)
-        style.configure("Field.TLabel", font=("Malgun Gothic", 10, "bold"), background=card_bg, foreground=field)
-        style.configure("Toolbar.TLabel", font=("Malgun Gothic", 9, "bold"), background=page_bg, foreground=muted)
-        style.configure("Status.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=muted)
-        style.configure("StatusCell.TLabel", font=("Malgun Gothic", 9), background=heading_bg, foreground=text, relief=tk.SUNKEN, padding=(8, 2))
-        style.configure("DropTitle.TLabel", font=("Malgun Gothic", 12, "bold"), background=soft_bg, foreground=primary)
+        style.configure("CardTitle.TLabel", font=bold_font, background=card_bg, foreground=muted)
+        style.configure("Count.TLabel", font=count_font, background=card_bg, foreground=text)
+        style.configure("Field.TLabel", font=bold_font, background=card_bg, foreground=field)
+        style.configure("Toolbar.TLabel", font=small_bold_font, background=page_bg, foreground=muted)
+        style.configure("Status.TLabel", font=small_font, background=heading_bg, foreground=muted)
+        style.configure("StatusCell.TLabel", font=small_font, background=heading_bg, foreground=text, relief=tk.SUNKEN, padding=(8, 2))
+        style.configure("DropTitle.TLabel", font=drop_title_font, background=soft_bg, foreground=primary)
         style.configure("DropText.TLabel", background=soft_bg, foreground=muted)
         style.configure("TEntry", fieldbackground=entry_bg, foreground=text, bordercolor=heading_bg, lightcolor=heading_bg, darkcolor=heading_bg)
-        style.configure("Primary.TButton", font=("Malgun Gothic", 10, "bold"), foreground="#ffffff", background=primary)
+        style.configure("Primary.TButton", font=bold_font, foreground="#ffffff", background=primary)
         style.map("Primary.TButton", background=[("active", primary_active), ("disabled", "#64748b")])
         style.configure("Secondary.TButton", foreground=text, background=secondary)
         style.map("Secondary.TButton", background=[("active", secondary_active), ("disabled", secondary)])
         style.configure("Treeview", rowheight=24, fieldbackground=card_bg, background=card_bg, foreground=text)
-        style.configure("Treeview.Heading", font=("Malgun Gothic", 10, "bold"), background=heading_bg, foreground=field)
+        style.configure("Treeview.Heading", font=bold_font, background=heading_bg, foreground=field)
         style.map("Treeview", background=[("selected", selection)], foreground=[("selected", text)])
 
     def _build_menu(self) -> None:
@@ -428,7 +466,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         settings_menu.add_cascade(label="스킨", menu=theme_menu)
         settings_menu.add_separator()
         settings_menu.add_checkbutton(
-            label="윈도우 시작 시 자동 실행",
+            label="로그인 시 자동 실행" if sys.platform == "darwin" else "윈도우 시작 시 자동 실행",
             variable=self.autostart_enabled,
             command=self._toggle_autostart_from_menu,
             onvalue=True,
@@ -853,7 +891,8 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
             messagebox.showinfo("업데이트 다운로드 완료", f"개발 실행 중에는 자동 교체를 건너뜁니다.\n다운로드 위치: {downloaded_exe}")
             return
 
-        if not messagebox.askyesno("업데이트 설치", "업데이트 설치를 위해 앱을 종료하고 다시 시작할까요?"):
+        install_message = "업데이트 설치 파일을 열고 앱을 종료할까요?" if sys.platform == "darwin" else "업데이트 설치를 위해 앱을 종료하고 다시 시작할까요?"
+        if not messagebox.askyesno("업데이트 설치", install_message):
             self.status.set("업데이트 설치 대기")
             return
 

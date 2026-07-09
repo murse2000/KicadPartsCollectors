@@ -5,3 +5,4 @@ dist/
 build/
 incoming_zips/
 processed_zips/
+etc/
