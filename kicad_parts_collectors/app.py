@@ -13,9 +13,9 @@ from PIL import Image, ImageDraw
 from .autostart import AutostartError, is_autostart_enabled, set_autostart_enabled
 from .collector import (
     CollectorError,
-    add_missing_lcsc_properties,
     build_install_plan,
     ensure_watch_folders,
+    fill_missing_lcsc_properties,
     import_easyeda_query,
     install_zip,
     install_zip_directory,
@@ -445,7 +445,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         library_menu = tk.Menu(menu_bar, tearoff=0)
         library_menu.add_command(label="라이브러리 위치 선택", command=self._choose_library_root)
         library_menu.add_command(label="라이브러리 상태 새로고침", command=self._refresh_library_view)
-        library_menu.add_command(label="누락 LCSC 속성 추가", command=self._add_missing_lcsc_properties)
+        library_menu.add_command(label="누락 LCSC 자동 채우기", command=self._fill_missing_lcsc_properties)
         library_menu.add_command(label="선택 항목 삭제", command=self._delete_selected_library_entries)
         menu_bar.add_cascade(label="라이브러리", menu=library_menu)
 
@@ -944,14 +944,14 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
 
     def _install_job(self, zip_path: Path, library_root: Path) -> None:
         try:
-            items = install_zip(zip_path, library_root)
+            items = install_zip(zip_path, library_root, fill_lcsc=True)
             self.after(0, self._show_items, "추가 완료", items)
         except CollectorError as exc:
             self.after(0, self._show_error, exc)
 
     def _batch_install_job(self, zip_directory: Path, library_root: Path) -> None:
         try:
-            results = install_zip_directory(zip_directory, library_root)
+            results = install_zip_directory(zip_directory, library_root, fill_lcsc=True)
             self.after(0, self._show_batch_results, results)
         except CollectorError as exc:
             self.after(0, self._show_error, exc)
@@ -1192,23 +1192,27 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self._refresh_library_view()
         self._clear_entry_detail()
 
-    def _add_missing_lcsc_properties(self) -> None:
+    def _fill_missing_lcsc_properties(self) -> None:
         library_root = Path(self.library_root.get())
         if not library_root.exists() or not library_root.is_dir():
             messagebox.showerror("확인 필요", "먼저 라이브러리 폴더를 선택하세요.")
             return
 
-        if not messagebox.askyesno("LCSC 속성 추가", "LCSC 속성이 없는 심볼에 빈 LCSC 속성을 추가할까요?"):
+        if not messagebox.askyesno(
+            "LCSC 자동 채우기",
+            "LCSC가 비어 있는 심볼을 EasyEDA/JLCPCB에서 정확 매칭으로 검색해 채울까요?\n"
+            "찾지 못한 심볼은 빈 LCSC 속성으로 남습니다.",
+        ):
             return
 
         try:
-            count = add_missing_lcsc_properties(library_root)
+            result = fill_missing_lcsc_properties(library_root)
         except CollectorError as exc:
             messagebox.showerror("처리 실패", str(exc))
             return
 
-        self.status.set(f"LCSC 속성 추가 완료: {count}개")
-        messagebox.showinfo("완료", f"LCSC 속성을 추가한 심볼: {count}개")
+        self.status.set(f"LCSC 자동 채우기 완료: 값 입력 {result.filled}개 / 빈 속성 추가 {result.added}개")
+        messagebox.showinfo("완료", f"LCSC 값을 채운 심볼: {result.filled}개\n빈 LCSC 속성을 추가한 심볼: {result.added}개")
         self._refresh_library_view()
 
     def _change_theme(self, _event=None) -> None:

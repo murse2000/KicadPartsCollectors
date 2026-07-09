@@ -37,6 +37,12 @@ class RemovalResult:
 
 
 @dataclass(frozen=True)
+class LcscUpdateResult:
+    added: int
+    filled: int
+
+
+@dataclass(frozen=True)
 class BatchInstallResult:
     zip_path: Path
     ok: bool
@@ -100,7 +106,7 @@ def build_install_plan(zip_path: Path, library_root: Path) -> list[InstallItem]:
     return items
 
 
-def install_zip(zip_path: Path, library_root: Path) -> list[InstallItem]:
+def install_zip(zip_path: Path, library_root: Path, fill_lcsc: bool = False) -> list[InstallItem]:
     items = build_install_plan(zip_path, library_root)
 
     with zipfile.ZipFile(zip_path) as archive:
@@ -110,7 +116,7 @@ def install_zip(zip_path: Path, library_root: Path) -> list[InstallItem]:
         model_references = _model_references_for(archive, footprint_library, Path(library_root) / "3dmodels", part_name)
         for item in items:
             if item.kind == "symbol":
-                _merge_symbol_file(archive.read(item.source), item.destination, footprint_references)
+                _merge_symbol_file(archive.read(item.source), item.destination, footprint_references, fill_lcsc)
                 continue
 
             if item.kind == "footprint":
@@ -233,7 +239,28 @@ def resolve_easyeda_lcsc_id(query: str) -> str:
     )
 
 
-def install_zip_directory(zip_directory: Path, library_root: Path) -> list[BatchInstallResult]:
+def resolve_easyeda_lcsc_id_exact(query: str) -> str | None:
+    query = query.strip()
+    if not query:
+        return None
+    if re.fullmatch(r"C\d+", query, re.IGNORECASE):
+        return query.upper()
+
+    try:
+        from easyeda2kicad.easyeda.easyeda_api import EasyedaApi
+    except ImportError as exc:
+        raise CollectorError("EasyEDA 검색 모듈을 찾지 못했습니다. requirements를 다시 설치하세요.") from exc
+
+    api = EasyedaApi(use_cache=False)
+    for candidate in _part_number_candidates(query):
+        search_result = api.search_jlcpcb_components(candidate, page_size=20)
+        match = _exact_lcsc_match(candidate, search_result.get("results") or [])
+        if match:
+            return match
+    return None
+
+
+def install_zip_directory(zip_directory: Path, library_root: Path, fill_lcsc: bool = False) -> list[BatchInstallResult]:
     zip_directory = Path(zip_directory)
     if not zip_directory.exists() or not zip_directory.is_dir():
         raise CollectorError("ZIP 파일이 들어있는 폴더를 선택하세요.")
@@ -245,7 +272,7 @@ def install_zip_directory(zip_directory: Path, library_root: Path) -> list[Batch
     results: list[BatchInstallResult] = []
     for zip_path in zip_paths:
         try:
-            items = install_zip(zip_path, library_root)
+            items = install_zip(zip_path, library_root, fill_lcsc)
             results.append(BatchInstallResult(zip_path, True, "추가 완료", len(items)))
         except Exception as exc:
             results.append(BatchInstallResult(zip_path, False, str(exc), 0))
@@ -342,6 +369,16 @@ def add_missing_lcsc_properties(library_root: Path) -> int:
     if count:
         symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
     return count
+
+
+def fill_missing_lcsc_properties(library_root: Path) -> LcscUpdateResult:
+    library_root = Path(library_root)
+    symbol_library = _symbol_library_for(library_root)
+    text = symbol_library.read_text(encoding="utf-8-sig")
+    updated_text, result = _fill_lcsc_properties(text)
+    if result.added or result.filled:
+        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+    return result
 
 
 def update_library_entry(
@@ -609,6 +646,20 @@ def _best_lcsc_match(query: str, results: list[dict[str, Any]]) -> str | None:
     return lcsc.upper() if lcsc else None
 
 
+def _exact_lcsc_match(query: str, results: list[dict[str, Any]]) -> str | None:
+    normalized_query = _normalize_part_number(query)
+    if not normalized_query:
+        return None
+
+    for result in results:
+        for field in ("lcsc", "model", "name"):
+            if _normalize_part_number(str(result.get(field, ""))) == normalized_query:
+                lcsc = str(result.get("lcsc", "")).strip()
+                if lcsc:
+                    return lcsc.upper()
+    return None
+
+
 def _normalize_part_number(value: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", value.upper())
 
@@ -689,9 +740,9 @@ def _ensure_new_symbols(source_bytes: bytes, destination: Path) -> None:
             raise CollectorError(f"이미 심볼이 존재합니다: {name}")
 
 
-def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_references: dict[str, str]) -> None:
+def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_references: dict[str, str], fill_lcsc: bool = False) -> None:
     source_text = _link_symbol_footprints(source_bytes.decode("utf-8-sig"), footprint_references)
-    source_text, _count = _ensure_symbol_property(source_text, "LCSC", "")
+    source_text, _result = _fill_lcsc_properties(source_text) if fill_lcsc else _add_lcsc_properties(source_text)
     destination_text = destination.read_text(encoding="utf-8-sig")
     symbol_blocks = _symbol_blocks(source_text)
     if not symbol_blocks:
@@ -939,6 +990,73 @@ def _ensure_symbol_property(text: str, property_name: str, value: str) -> tuple[
         count += 1
 
     return updated_text, count
+
+
+def _add_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
+    updated_text, count = _ensure_symbol_property(text, "LCSC", "")
+    return updated_text, LcscUpdateResult(added=count, filled=0)
+
+
+def _fill_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
+    updated_text = text
+    added = 0
+    filled = 0
+    for block in _symbol_blocks(text):
+        symbol_name = _symbol_name(block) or ""
+        properties = _property_values(block)
+        lcsc = properties.get("LCSC")
+        if lcsc:
+            continue
+
+        updated_block = block if lcsc is not None else _upsert_property_value(block, "LCSC", "")
+        if lcsc is None:
+            added += 1
+
+        matched_lcsc = _find_exact_lcsc_for_symbol(symbol_name, properties)
+        if matched_lcsc:
+            updated_block = _replace_property_value(updated_block, "LCSC", matched_lcsc)
+            filled += 1
+
+        updated_text = updated_text.replace(block, updated_block, 1)
+
+    return updated_text, LcscUpdateResult(added=added, filled=filled)
+
+
+def _find_exact_lcsc_for_symbol(symbol_name: str, properties: dict[str, str]) -> str | None:
+    for candidate in _lcsc_lookup_candidates(symbol_name, properties):
+        try:
+            lcsc = resolve_easyeda_lcsc_id_exact(candidate)
+        except Exception:
+            continue
+        if lcsc:
+            return lcsc
+    return None
+
+
+def _lcsc_lookup_candidates(symbol_name: str, properties: dict[str, str]) -> list[str]:
+    names = (
+        "MPN",
+        "Mpn",
+        "Manufacturer Part Number",
+        "Manufacturer_Part_Number",
+        "ManufacturerPartNumber",
+        "Part Number",
+        "PartNumber",
+        "Model",
+        "Value",
+    )
+    values = [properties.get(name, "") for name in names]
+    values.append(symbol_name)
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        key = _normalize_part_number(normalized)
+        if normalized and key and key not in seen:
+            candidates.append(normalized)
+            seen.add(key)
+    return candidates
 
 
 def _remove_property(text: str, property_name: str) -> str:

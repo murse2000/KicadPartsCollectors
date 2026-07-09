@@ -123,6 +123,66 @@ class CollectorTests(unittest.TestCase):
             self.assertIn('(property "LCSC" ""', updated)
             self.assertEqual(1, updated.count('(property "LCSC" "C123"'))
 
+    def test_fill_missing_lcsc_properties_uses_exact_match_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            symbol_library.write_text(
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "STM32L432KBU6" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "STM32L432KBU6" (at 0 0 0))\n'
+                '  )\n'
+                '  (symbol "Ambiguous" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "AMBIGUOUS" (at 0 0 0))\n'
+                '  )\n'
+                ')\n'
+            )
+            original_resolver = collector.resolve_easyeda_lcsc_id_exact
+
+            def fake_resolver(query: str) -> str | None:
+                return "C94784" if query == "STM32L432KBU6" else None
+
+            try:
+                collector.resolve_easyeda_lcsc_id_exact = fake_resolver
+                result = collector.fill_missing_lcsc_properties(library_root)
+            finally:
+                collector.resolve_easyeda_lcsc_id_exact = original_resolver
+
+            updated = symbol_library.read_text()
+            self.assertEqual(2, result.added)
+            self.assertEqual(1, result.filled)
+            self.assertIn('(property "LCSC" "C94784"', updated)
+            self.assertEqual(1, updated.count('(property "LCSC" ""'))
+
+    def test_install_zip_can_fill_lcsc_for_new_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zip_path = root / "VendorPart.zip"
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics_decal_library.pretty"
+            symbol_library.write_text('(kicad_symbol_lib (version 20211014) (generator test)\n)\n')
+            footprint_library.mkdir()
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("symbols/Vendor.kicad_sym", symbol_library_text("Vendor"))
+                archive.writestr("Vendor.pretty/Part.kicad_mod", footprint_text("Part.step"))
+                archive.writestr("models/Part.step", "step")
+            original_resolver = collector.resolve_easyeda_lcsc_id_exact
+
+            def fake_resolver(query: str) -> str | None:
+                return "C12345" if query == "Vendor" else None
+
+            try:
+                collector.resolve_easyeda_lcsc_id_exact = fake_resolver
+                install_zip(zip_path, library_root, fill_lcsc=True)
+            finally:
+                collector.resolve_easyeda_lcsc_id_exact = original_resolver
+
+            self.assertIn('(property "LCSC" "C12345"', symbol_library.read_text())
+
     def test_ultra_librarian_package_uses_part_folder_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -540,6 +600,14 @@ class CollectorTests(unittest.TestCase):
         ]
 
         self.assertEqual("C94784", collector._best_lcsc_match("STM32L432KBU6", results))
+
+    def test_exact_lcsc_match_rejects_partial_match(self) -> None:
+        results = [
+            {"lcsc": "C111", "model": "STM32L432KCU6", "name": "near match"},
+            {"lcsc": "C222", "model": "STM32L432KBU6TR", "name": "partial match"},
+        ]
+
+        self.assertIsNone(collector._exact_lcsc_match("STM32L432KBU6", results))
 
     def test_existing_file_blocks_install(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
