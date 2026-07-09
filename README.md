@@ -139,10 +139,21 @@ ditto -c -k --sequesterRsrc --keepParent dist/KiCadPartsCollector.app dist/KiCad
 ## 새 버전 배포
 
 1. `kicad_parts_collectors/version.py`의 `APP_VERSION`을 올립니다.
-2. Windows와 macOS에서 각각 빌드합니다.
-3. `v버전` 형식의 Git 태그를 만듭니다.
-4. GitHub Release를 생성합니다.
-5. `dist\KiCadPartsCollector.exe`와 macOS 패키지를 Release asset으로 업로드합니다.
+2. 변경 사항을 `main` 브랜치에 커밋하고 푸시합니다.
+3. `v버전` 형식의 Git 태그를 만들고 푸시합니다.
+4. GitHub Actions가 Windows/macOS 빌드를 실행하고 Release asset을 자동 업로드합니다.
+
+```powershell
+git tag v1.0.8
+git push origin v1.0.8
+```
+
+자동 Release asset 이름은 다음과 같습니다.
+
+```text
+KiCadPartsCollector.exe
+KiCadPartsCollector.app.zip
+```
 
 ## 테스트
 
