@@ -133,9 +133,13 @@ def install_downloaded_update(downloaded_exe: Path, current_exe: Path) -> None:
 
 def _release_asset(assets: list[dict], platform: str | None = None) -> ReleaseAsset | None:
     expected_names = tuple(name.lower() for name in release_asset_names(platform))
-    exact_matches = [asset for asset in assets if str(asset.get("name", "")).lower() in expected_names]
-    extension_matches = [asset for asset in assets if _asset_matches_platform(str(asset.get("name", "")), platform)]
-    selected = (exact_matches or extension_matches or [None])[0]
+    selected = None
+    for expected_name in expected_names:
+        selected = next((asset for asset in assets if str(asset.get("name", "")).lower() == expected_name), None)
+        if selected is not None:
+            break
+    if selected is None:
+        selected = next((asset for asset in assets if _asset_matches_platform(str(asset.get("name", "")), platform)), None)
     if selected is None:
         return None
 

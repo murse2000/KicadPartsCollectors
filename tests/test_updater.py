@@ -31,6 +31,7 @@ class UpdaterTests(unittest.TestCase):
         asset = _release_asset(
             [
                 {"name": "KiCadPartsCollector.exe", "browser_download_url": "https://example.com/app.exe"},
+                {"name": "KiCadPartsCollector.app.zip", "browser_download_url": "https://example.com/app.zip"},
                 {"name": "KiCadPartsCollector.dmg", "browser_download_url": "https://example.com/app.dmg"},
             ],
             platform="darwin",
