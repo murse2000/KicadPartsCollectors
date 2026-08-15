@@ -98,6 +98,50 @@ class CollectorTests(unittest.TestCase):
             self.assertIn(f'(model "{(library_root / "3dmodels" / "Vendor.step").resolve().as_posix()}"', footprint)
             self.assertEqual("step", (library_root / "3dmodels" / "Vendor.step").read_text())
 
+    def test_macos_zip_metadata_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zip_path = root / "LIB_SS14.zip"
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics_decal_library.pretty"
+            symbol_library.write_text('(kicad_symbol_lib (version 20211014) (generator test)\n)\n')
+            footprint_library.mkdir()
+
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("LIB_SS14/SS14/KiCad/SS14.kicad_sym", symbol_library_text("SS14"))
+                archive.writestr("LIB_SS14/SS14/KiCad/DIOM5126X250N.kicad_mod", module_text("SS14.stp"))
+                archive.writestr("LIB_SS14/SS14/3D/SS14.stp", "step")
+                archive.writestr("__MACOSX/LIB_SS14/SS14/KiCad/._SS14.kicad_sym", b"\x00\x05\x16\x07\x00\x02\xa2")
+
+            items = install_zip(zip_path, library_root)
+
+            self.assertEqual({"symbol": 1, "footprint": 1, "3d_model": 1}, summarize_items(items))
+            self.assertIn('(symbol "SS14"', symbol_library.read_text())
+            self.assertTrue((footprint_library / "SS14.kicad_mod").exists())
+
+    def test_empty_library_folder_is_initialized(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zip_path = root / "NewLibraryPart.zip"
+            library_root = root / "empty_library"
+            library_root.mkdir()
+
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("NewLibraryPart.kicad_sym", symbol_library_text("NewLibraryPart"))
+                archive.writestr("NewLibraryPart.kicad_mod", module_text("NewLibraryPart.step"))
+                archive.writestr("NewLibraryPart.step", "step")
+
+            items = install_zip(zip_path, library_root)
+
+            symbol_library = library_root / "KiCadPartsCollector.kicad_sym"
+            footprint_library = library_root / "KiCadPartsCollector.pretty"
+            self.assertEqual({"symbol": 1, "footprint": 1, "3d_model": 1}, summarize_items(items))
+            self.assertTrue(symbol_library.exists())
+            self.assertTrue(footprint_library.is_dir())
+            self.assertIn('(symbol "NewLibraryPart"', symbol_library.read_text())
+
     def test_add_missing_lcsc_properties_updates_existing_symbols(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -559,6 +603,35 @@ class CollectorTests(unittest.TestCase):
             self.assertFalse(zip_path.exists())
             self.assertTrue((processed / "Auto.zip").exists())
             self.assertTrue((footprint_library / "Auto.kicad_mod").exists())
+
+    def test_process_watch_folder_installs_and_moves_package_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            incoming = root / "incoming_zips"
+            processed = root / "processed_zips"
+            library_root = root / "library"
+            incoming.mkdir()
+            processed.mkdir()
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics.pretty"
+            symbol_library.write_text('(kicad_symbol_lib (version 20211014) (generator test)\n)\n')
+            footprint_library.mkdir()
+
+            package_directory = incoming / "FolderPart"
+            package_directory.mkdir()
+            (package_directory / "FolderPart.kicad_sym").write_text(symbol_library_text("FolderPart"))
+            (package_directory / "FolderPart.kicad_mod").write_text(module_text("FolderPart.step"))
+            (package_directory / "FolderPart.step").write_text("step")
+
+            results = process_watch_folder(library_root, WatchFolders(incoming, processed))
+
+            self.assertEqual(1, len(results))
+            self.assertTrue(results[0].ok)
+            self.assertFalse(package_directory.exists())
+            self.assertTrue((processed / "FolderPart").is_dir())
+            self.assertTrue((footprint_library / "FolderPart.kicad_mod").exists())
+            self.assertTrue((library_root / "3dmodels" / "FolderPart.step").exists())
 
     def test_process_watch_folder_imports_easyeda_id_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

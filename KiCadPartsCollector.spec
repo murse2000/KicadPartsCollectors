@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path.cwd()))
+
 from PyInstaller.utils.hooks import collect_all
 from kicad_parts_collectors.version import APP_VERSION
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import tempfile
 import zipfile
 import re
 from dataclasses import dataclass
@@ -79,6 +80,15 @@ class CollectorError(Exception):
     pass
 
 
+DEFAULT_SYMBOL_LIBRARY_NAME = "KiCadPartsCollector.kicad_sym"
+DEFAULT_FOOTPRINT_LIBRARY_NAME = "KiCadPartsCollector.pretty"
+
+
+def _write_text_lf(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as file:
+        file.write(text)
+
+
 def build_install_plan(zip_path: Path, library_root: Path) -> list[InstallItem]:
     zip_path = Path(zip_path)
     library_root = Path(library_root)
@@ -95,6 +105,8 @@ def build_install_plan(zip_path: Path, library_root: Path) -> list[InstallItem]:
                 continue
 
             source = _safe_zip_path(info.filename)
+            if _is_zip_metadata(source):
+                continue
             destination, kind = _destination_for(source, library_root, package_name, part_name, symbol_library, footprint_library)
             if destination is None:
                 continue
@@ -138,6 +150,21 @@ def install_zip(zip_path: Path, library_root: Path, fill_lcsc: bool = False) -> 
                     shutil.copyfileobj(source_file, destination_file)
 
     return items
+
+
+def install_package_directory(package_directory: Path, library_root: Path) -> list[InstallItem]:
+    package_directory = Path(package_directory)
+    if not package_directory.exists() or not package_directory.is_dir():
+        raise CollectorError("KiCad 파일이 들어있는 폴더를 선택하세요.")
+
+    with tempfile.TemporaryDirectory(prefix="kicad-parts-collector-") as temp_dir:
+        zip_path = Path(temp_dir) / f"{package_directory.name}.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(package_directory.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(package_directory.parent).as_posix())
+
+        return install_zip(zip_path, library_root)
 
 
 def import_easyeda_component(lcsc_id: str, library_root: Path) -> list[InstallItem]:
@@ -311,12 +338,16 @@ def ensure_watch_folders(base_directory: Path | None = None) -> WatchFolders:
 def process_watch_folder(library_root: Path, folders: WatchFolders) -> list[BatchInstallResult]:
     results: list[BatchInstallResult] = []
     for package_path in _watch_candidates(folders.incoming):
-        if package_path.suffix.lower() == ".zip" and not _is_stable_file(package_path):
+        if package_path.is_file() and package_path.suffix.lower() == ".zip" and not _is_stable_file(package_path):
+            continue
+        if package_path.is_dir() and not _is_stable_directory(package_path):
             continue
 
         try:
             if _is_easyeda_id_file(package_path):
                 items = _import_easyeda_id_file(package_path, library_root)
+            elif package_path.is_dir():
+                items = install_package_directory(package_path, library_root)
             else:
                 items = install_zip(package_path, library_root)
             results.append(BatchInstallResult(package_path, True, "자동 추가 완료", len(items)))
@@ -376,7 +407,7 @@ def add_missing_lcsc_properties(library_root: Path) -> int:
     text = symbol_library.read_text(encoding="utf-8-sig")
     updated_text, count = _ensure_symbol_property(text, "LCSC", "")
     if count:
-        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+        _write_text_lf(symbol_library, updated_text)
     return count
 
 
@@ -389,7 +420,7 @@ def fill_missing_lcsc_properties(
     text = symbol_library.read_text(encoding="utf-8-sig")
     updated_text, result = _fill_lcsc_properties(text, progress_callback)
     if result.added or result.filled:
-        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+        _write_text_lf(symbol_library, updated_text)
     return result
 
 
@@ -417,7 +448,7 @@ def update_library_entry(
             updated_block = _remove_property(updated_block, name)
 
         text = text.replace(block, updated_block, 1)
-        symbol_library.write_text(text, encoding="utf-8", newline="\n")
+        _write_text_lf(symbol_library, text)
 
         footprint = properties.get("Footprint", "")
         footprint_path = _footprint_path_for_reference(footprint, footprint_library, nickname)
@@ -462,7 +493,7 @@ def remove_library_entries(library_root: Path, symbols: list[str]) -> RemovalRes
     if removed_symbols == 0:
         raise CollectorError("삭제할 심볼을 찾지 못했습니다.")
 
-    symbol_library.write_text(_clean_symbol_library_text(text), encoding="utf-8", newline="\n")
+    _write_text_lf(symbol_library, _clean_symbol_library_text(text))
     return RemovalResult(removed_symbols, removed_footprints, removed_models)
 
 
@@ -565,6 +596,32 @@ def _is_stable_file(path: Path) -> bool:
     return first > 0 and first == second and zipfile.is_zipfile(path)
 
 
+def _is_stable_directory(path: Path) -> bool:
+    if not path.is_dir() or path.name.startswith(".") or path.name == "__MACOSX":
+        return False
+
+    first = _directory_signature(path)
+    second = _directory_signature(path)
+    return bool(first) and first == second
+
+
+def _directory_signature(path: Path) -> tuple[tuple[str, int, int], ...]:
+    signature: list[tuple[str, int, int]] = []
+    try:
+        paths = sorted(child for child in path.rglob("*") if child.is_file())
+    except OSError:
+        return ()
+
+    for child in paths:
+        try:
+            stat = child.stat()
+        except OSError:
+            return ()
+        signature.append((child.relative_to(path).as_posix(), stat.st_size, stat.st_mtime_ns))
+
+    return tuple(signature)
+
+
 def _move_to_processed(zip_path: Path, processed_directory: Path, failed: bool) -> Path:
     suffix = "_failed" if failed else ""
     destination = processed_directory / f"{zip_path.stem}{suffix}{zip_path.suffix}"
@@ -580,6 +637,8 @@ def _watch_candidates(incoming_directory: Path) -> list[Path]:
         if path.name.startswith(".") or path.name == "__MACOSX":
             continue
         if path.is_file() and (path.suffix.lower() == ".zip" or _is_easyeda_id_file(path)):
+            candidates.append(path)
+        elif path.is_dir():
             candidates.append(path)
 
     return candidates
@@ -682,6 +741,20 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def _is_zip_metadata(source: PurePosixPath) -> bool:
+    return source.parts[:1] == ("__MACOSX",) or any(part == ".DS_Store" or part.startswith("._") for part in source.parts)
+
+
+def _decode_kicad_text(source_bytes: bytes) -> str:
+    for encoding in ("utf-8-sig", "cp949", "euc-kr", "latin-1"):
+        try:
+            return source_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    raise CollectorError("KiCad 텍스트 파일 인코딩을 해석하지 못했습니다.")
+
+
 def _destination_for(
     source: PurePosixPath,
     library_root: Path,
@@ -708,6 +781,9 @@ def _symbol_library_for(library_root: Path) -> Path:
     if library_root.suffix.lower() == ".kicad_sym":
         return library_root
 
+    if not library_root.exists() or not library_root.is_dir():
+        raise CollectorError("존재하는 라이브러리 폴더를 선택하세요.")
+
     candidates = _existing_paths([
         *library_root.glob("*.kicad_sym"),
         *((library_root / "symbols").glob("*.kicad_sym") if (library_root / "symbols").is_dir() else []),
@@ -716,7 +792,9 @@ def _symbol_library_for(library_root: Path) -> Path:
         return candidates[0]
 
     if not candidates:
-        raise CollectorError("단일 심볼 라이브러리 파일을 찾지 못했습니다. 라이브러리 폴더 안에 .kicad_sym 파일이 하나 있어야 합니다.")
+        symbol_library = library_root / DEFAULT_SYMBOL_LIBRARY_NAME
+        _write_text_lf(symbol_library, '(kicad_symbol_lib (version 20211014) (generator KiCadPartsCollector)\n)\n')
+        return symbol_library
 
     raise CollectorError("심볼 라이브러리 파일이 여러 개입니다. 하나의 .kicad_sym 파일만 있는 폴더를 선택하세요.")
 
@@ -724,6 +802,9 @@ def _symbol_library_for(library_root: Path) -> Path:
 def _footprint_library_for(library_root: Path) -> Path:
     if library_root.suffix.lower() == ".pretty":
         return library_root
+
+    if not library_root.exists() or not library_root.is_dir():
+        raise CollectorError("존재하는 라이브러리 폴더를 선택하세요.")
 
     candidates = _existing_paths([
         *library_root.glob("*.pretty"),
@@ -733,7 +814,9 @@ def _footprint_library_for(library_root: Path) -> Path:
         return candidates[0]
 
     if not candidates:
-        raise CollectorError("단일 풋프린트 라이브러리 폴더를 찾지 못했습니다. 라이브러리 폴더 안에 .pretty 폴더가 하나 있어야 합니다.")
+        footprint_library = library_root / DEFAULT_FOOTPRINT_LIBRARY_NAME
+        footprint_library.mkdir(parents=True, exist_ok=True)
+        return footprint_library
 
     raise CollectorError("풋프린트 라이브러리 폴더가 여러 개입니다. 하나의 .pretty 폴더만 있는 폴더를 선택하세요.")
 
@@ -743,7 +826,7 @@ def _existing_paths(paths: list[Path]) -> list[Path]:
 
 
 def _ensure_new_symbols(source_bytes: bytes, destination: Path) -> None:
-    source_text = source_bytes.decode("utf-8-sig")
+    source_text = _decode_kicad_text(source_bytes)
     destination_text = destination.read_text(encoding="utf-8-sig")
     existing_names = set(_symbol_names(destination_text))
 
@@ -753,7 +836,7 @@ def _ensure_new_symbols(source_bytes: bytes, destination: Path) -> None:
 
 
 def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_references: dict[str, str], fill_lcsc: bool = False) -> None:
-    source_text = _link_symbol_footprints(source_bytes.decode("utf-8-sig"), footprint_references)
+    source_text = _link_symbol_footprints(_decode_kicad_text(source_bytes), footprint_references)
     source_text, _result = _fill_lcsc_properties(source_text) if fill_lcsc else _add_lcsc_properties(source_text)
     destination_text = destination.read_text(encoding="utf-8-sig")
     symbol_blocks = _symbol_blocks(source_text)
@@ -762,7 +845,7 @@ def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_referen
 
     insert_at = _last_top_level_close(destination_text)
     merged = destination_text[:insert_at].rstrip() + "\n" + "\n".join(symbol_blocks) + "\n" + destination_text[insert_at:]
-    destination.write_text(merged, encoding="utf-8", newline="\n")
+    _write_text_lf(destination, merged)
 
 
 def _footprint_references_for(archive: zipfile.ZipFile, footprint_library: Path, part_name: str) -> dict[str, str]:
@@ -775,11 +858,13 @@ def _footprint_references_for(archive: zipfile.ZipFile, footprint_library: Path,
             continue
 
         source = _safe_zip_path(info.filename)
+        if _is_zip_metadata(source):
+            continue
         if source.suffix.lower() == ".kicad_mod":
             references[source.stem] = reference
             references[part_name] = reference
         if source.suffix.lower() == ".kicad_sym":
-            text = archive.read(info.filename).decode("utf-8-sig")
+            text = _decode_kicad_text(archive.read(info.filename))
             for name in _symbol_names(text):
                 references[name] = reference
 
@@ -794,6 +879,8 @@ def _model_references_for(archive: zipfile.ZipFile, footprint_library: Path, mod
             continue
 
         source = _safe_zip_path(info.filename)
+        if _is_zip_metadata(source):
+            continue
         if source.suffix.lower() in {".step", ".stp"}:
             model_name = f"{part_name}{source.suffix.lower()}"
             references[source.name] = _model_path(model_directory / model_name)
@@ -808,11 +895,11 @@ def _model_path(model_path: Path) -> str:
 
 
 def _write_footprint_file(source_bytes: bytes, destination: Path, footprint_name: str, model_references: dict[str, str]) -> None:
-    text = source_bytes.decode("utf-8-sig")
+    text = _decode_kicad_text(source_bytes)
     text = _rename_footprint(text, footprint_name)
     text = _link_footprint_models(text, model_references)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(text, encoding="utf-8", newline="\n")
+    _write_text_lf(destination, text)
 
 
 def _rename_footprint(text: str, footprint_name: str) -> str:
@@ -1186,7 +1273,7 @@ def _write_footprint_model(footprint_path: Path, model: str) -> None:
         )
         text = text[:insert_at] + model_block + text[insert_at:]
 
-    footprint_path.write_text(text, encoding="utf-8", newline="\n")
+    _write_text_lf(footprint_path, text)
 
 
 def _quoted_value_end(text: str, start: int) -> int:
@@ -1310,6 +1397,8 @@ def _package_name_for(archive: zipfile.ZipFile, zip_path: Path) -> str:
             continue
 
         source = _safe_zip_path(info.filename)
+        if _is_zip_metadata(source):
+            continue
         if source.suffix.lower() in {".kicad_sym", ".kicad_mod", ".step", ".stp"} and _has_package_root(source):
             return source.parts[0]
 
@@ -1325,10 +1414,12 @@ def _part_name_for(archive: zipfile.ZipFile, fallback: str) -> str:
             continue
 
         source = _safe_zip_path(info.filename)
+        if _is_zip_metadata(source):
+            continue
         if source.suffix.lower() != ".kicad_sym":
             continue
 
-        text = archive.read(info.filename).decode("utf-8-sig")
+        text = _decode_kicad_text(archive.read(info.filename))
         for block in _symbol_blocks(text):
             value = _property_value(block, "Value")
             if value:

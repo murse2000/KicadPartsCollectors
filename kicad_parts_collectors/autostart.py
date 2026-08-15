@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import plistlib
 import sys
+import plistlib
 from pathlib import Path
 
 APP_NAME = "KiCadPartsCollector"
