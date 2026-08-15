@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,6 +42,7 @@ from .collector import (
     update_library_entry,
 )
 from .settings import AppSettings, load_settings, save_settings
+from .updater import UpdateError, download_release_asset, fetch_latest_release, install_downloaded_update, is_newer_version
 from .version import APP_VERSION
 
 
@@ -132,6 +134,10 @@ def _resource_path(relative_path: str) -> Path:
 
 
 class KicadPartsCollectorQtApp(QMainWindow):
+    update_error = Signal(str)
+    update_release_ready = Signal(object)
+    update_download_ready = Signal(Path)
+
     def __init__(self) -> None:
         super().__init__()
         self.settings = load_settings()
@@ -167,6 +173,9 @@ class KicadPartsCollectorQtApp(QMainWindow):
         self.incoming_edit = QLineEdit(self._watch_folder_text(self.settings.incoming_folder, default_watch_folders.incoming))
         self.processed_edit = QLineEdit(self._watch_folder_text(self.settings.processed_folder, default_watch_folders.processed))
         self.autostart_action: QAction | None = None
+        self.update_error.connect(lambda message: self._error("업데이트 실패", message))
+        self.update_release_ready.connect(self._handle_update_release)
+        self.update_download_ready.connect(self._install_update)
 
         self._build_menu()
         self._build_ui()
@@ -202,6 +211,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         watch_menu.addAction(self.autostart_action)
 
         help_menu = self.menuBar().addMenu("도움말")
+        help_menu.addAction("업데이트 확인", self.check_for_update)
         help_menu.addAction("버전 정보", self.show_version)
 
     def _build_ui(self) -> None:
@@ -641,6 +651,68 @@ class KicadPartsCollectorQtApp(QMainWindow):
 
     def show_version(self) -> None:
         QMessageBox.information(self, "버전 정보", f"KiCad Parts Collector\n현재 버전: {APP_VERSION}")
+
+    def check_for_update(self) -> None:
+        self.statusBar().showMessage("업데이트 확인 중입니다.")
+        threading.Thread(target=self._check_for_update_job, daemon=True).start()
+
+    def _check_for_update_job(self) -> None:
+        try:
+            release = fetch_latest_release()
+        except UpdateError as exc:
+            self.update_error.emit(str(exc))
+            return
+
+        self.update_release_ready.emit(release)
+
+    def _handle_update_release(self, release) -> None:
+        if not is_newer_version(release.version, APP_VERSION):
+            self.statusBar().showMessage("최신 버전입니다.")
+            QMessageBox.information(self, "업데이트 확인", f"현재 최신 버전입니다.\n현재 버전: {APP_VERSION}")
+            return
+
+        notes = release.body.strip()
+        if len(notes) > 400:
+            notes = notes[:400] + "..."
+        message = f"새 버전이 있습니다.\n\n현재 버전: {APP_VERSION}\n최신 버전: {release.version}"
+        if notes:
+            message += f"\n\n{notes}"
+        message += "\n\n다운로드하고 설치할까요?"
+        if QMessageBox.question(self, "업데이트 확인", message) != QMessageBox.Yes:
+            self.statusBar().showMessage("업데이트 취소")
+            return
+
+        self.statusBar().showMessage("업데이트 다운로드 중입니다.")
+        threading.Thread(target=self._download_update_job, args=(release,), daemon=True).start()
+
+    def _download_update_job(self, release) -> None:
+        try:
+            downloaded_asset = download_release_asset(release.asset)
+        except UpdateError as exc:
+            self.update_error.emit(str(exc))
+            return
+
+        self.update_download_ready.emit(downloaded_asset)
+
+    def _install_update(self, downloaded_asset: Path) -> None:
+        if not getattr(sys, "frozen", False):
+            self.statusBar().showMessage("업데이트 다운로드 완료")
+            QMessageBox.information(self, "업데이트 다운로드 완료", f"개발 실행 중에는 자동 교체를 건너뜁니다.\n다운로드 위치: {downloaded_asset}")
+            return
+
+        install_message = "업데이트 설치 파일을 열고 앱을 종료할까요?" if sys.platform == "darwin" else "업데이트 설치를 위해 앱을 종료하고 다시 시작할까요?"
+        if QMessageBox.question(self, "업데이트 설치", install_message) != QMessageBox.Yes:
+            self.statusBar().showMessage("업데이트 설치 대기")
+            return
+
+        try:
+            install_downloaded_update(downloaded_asset, Path(sys.executable))
+        except UpdateError as exc:
+            self._error("업데이트 실패", str(exc))
+            self.statusBar().showMessage("업데이트 실패")
+            return
+
+        QApplication.quit()
 
     def _validated_paths(self) -> tuple[Path, Path]:
         zip_path = Path(self.zip_edit.text())
