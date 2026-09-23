@@ -8,6 +8,8 @@ from PyInstaller.utils.hooks import collect_all
 from kicad_parts_collectors.version import APP_VERSION
 
 datas = [('assets/app_icon.png', 'assets'), ('assets/app_icon.ico', 'assets')]
+datas += [(f'kicad_parts_collectors/preview_assets/{name}', 'kicad_parts_collectors/preview_assets')
+          for name in ('index.html', 'viewer.js', 'THREE-LICENSE.txt', 'LUCIDE-LICENSE.txt')]
 binaries = []
 hiddenimports = []
 if sys.platform == 'win32':

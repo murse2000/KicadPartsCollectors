@@ -1,0 +1,1 @@
+{"private":true,"scripts":{"build":"esbuild viewer.source.js --bundle --minify --outfile=viewer.js --legal-comments=eof"},"dependencies":{"three":"0.180.0","lucide":"0.468.0"},"devDependencies":{"esbuild":"0.25.10"}}

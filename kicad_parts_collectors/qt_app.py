@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +43,7 @@ from .collector import (
     update_library_entry,
 )
 from .settings import AppSettings, load_settings, save_settings
+from .preview_window import PreviewWindow
 from .updater import UpdateError, download_release_asset, fetch_latest_release, install_downloaded_update, is_newer_version
 from .version import APP_VERSION
 
@@ -53,12 +55,12 @@ QMainWindow {
 QWidget {
     color: #172033;
     font-family: "Apple SD Gothic Neo";
-    font-size: 13px;
+    font-size: 12px;
 }
 QFrame#topBar, QFrame#panel {
     background: #ffffff;
     border: 1px solid #e5e9f2;
-    border-radius: 10px;
+    border-radius: 0;
 }
 QLabel#title {
     font-size: 20px;
@@ -68,21 +70,21 @@ QLabel#muted {
     color: #667085;
 }
 QLabel#sectionTitle {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
 }
 QLineEdit {
     background: #f8fafc;
     border: 1px solid #d8dee9;
-    border-radius: 8px;
-    padding: 8px 10px;
+    border-radius: 3px;
+    padding: 3px 5px;
     selection-background-color: #c7d2fe;
 }
 QPushButton {
     background: #eef2f7;
     border: 1px solid #d8dee9;
-    border-radius: 8px;
-    padding: 8px 12px;
+    border-radius: 3px;
+    padding: 3px 7px;
     font-weight: 600;
 }
 QPushButton:hover {
@@ -108,7 +110,7 @@ QTableWidget {
     background: #ffffff;
     alternate-background-color: #f8fafc;
     border: 1px solid #e5e9f2;
-    border-radius: 8px;
+    border-radius: 0;
     gridline-color: #edf1f7;
     selection-background-color: #dbeafe;
     selection-color: #172033;
@@ -117,7 +119,7 @@ QHeaderView::section {
     background: #f1f5f9;
     border: 0;
     border-right: 1px solid #e5e9f2;
-    padding: 8px;
+    padding: 4px;
     font-weight: 700;
 }
 QStatusBar {
@@ -142,8 +144,8 @@ class KicadPartsCollectorQtApp(QMainWindow):
         super().__init__()
         self.settings = load_settings()
         self.setWindowTitle(f"KiCad Parts Collector {APP_VERSION}")
-        self.resize(1180, 760)
-        self.setMinimumSize(1040, 640)
+        self.resize(940, 580)
+        self.setMinimumSize(800, 500)
 
         icon_path = _resource_path("assets/app_icon.png")
         if icon_path.exists():
@@ -218,22 +220,15 @@ class KicadPartsCollectorQtApp(QMainWindow):
         central = QWidget()
         central.setObjectName("central")
         root = QVBoxLayout(central)
-        root.setContentsMargins(16, 16, 16, 10)
-        root.setSpacing(12)
+        root.setContentsMargins(6, 4, 6, 0)
+        root.setSpacing(4)
 
         top_bar = QFrame()
         top_bar.setObjectName("topBar")
         top_layout = QGridLayout(top_bar)
-        top_layout.setContentsMargins(14, 12, 14, 12)
-        top_layout.setHorizontalSpacing(10)
-        top_layout.setVerticalSpacing(8)
-
-        title = QLabel("KiCad Parts Collector")
-        title.setObjectName("title")
-        subtitle = QLabel("ZIP으로 받은 심볼, 풋프린트, 3D 모델을 KiCad 라이브러리에 정리합니다.")
-        subtitle.setObjectName("muted")
-        top_layout.addWidget(title, 0, 0, 1, 4)
-        top_layout.addWidget(subtitle, 1, 0, 1, 4)
+        top_layout.setContentsMargins(4, 4, 4, 4)
+        top_layout.setHorizontalSpacing(4)
+        top_layout.setVerticalSpacing(4)
 
         top_layout.addWidget(QLabel("ZIP"), 2, 0)
         top_layout.addWidget(self.zip_edit, 2, 1)
@@ -249,69 +244,45 @@ class KicadPartsCollectorQtApp(QMainWindow):
 
         preview_button = QPushButton("미리보기")
         preview_button.clicked.connect(self.preview_zip)
-        install_button = QPushButton("라이브러리에 추가")
+        install_button = QPushButton("라이브러리 추가")
         install_button.setObjectName("primary")
         install_button.clicked.connect(self.install_current_zip)
-        batch_button = QPushButton("폴더 일괄 추가")
-        batch_button.clicked.connect(self.install_directory)
         top_layout.addWidget(preview_button, 2, 3)
         top_layout.addWidget(install_button, 3, 3)
-        top_layout.addWidget(batch_button, 2, 4, 2, 1)
         top_layout.addWidget(QLabel("EasyEDA"), 4, 0)
         top_layout.addWidget(self.easyeda_edit, 4, 1)
-        easyeda_button = QPushButton("EasyEDA에서 가져오기")
+        easyeda_button = QPushButton("EasyEDA 가져오기")
         easyeda_button.clicked.connect(self.import_easyeda)
         top_layout.addWidget(easyeda_button, 4, 2, 1, 2)
         top_layout.setColumnStretch(1, 1)
         root.addWidget(top_bar)
 
-        watch_bar = QFrame()
-        watch_bar.setObjectName("topBar")
-        watch_layout = QGridLayout(watch_bar)
-        watch_layout.setContentsMargins(14, 10, 14, 10)
-        watch_layout.setHorizontalSpacing(10)
-        watch_layout.addWidget(QLabel("수신폴더"), 0, 0)
-        watch_layout.addWidget(self.incoming_edit, 0, 1)
-        incoming_button = QPushButton("찾기")
-        incoming_button.clicked.connect(self.choose_incoming_folder)
-        watch_layout.addWidget(incoming_button, 0, 2)
-        watch_layout.addWidget(QLabel("백업폴더"), 1, 0)
-        watch_layout.addWidget(self.processed_edit, 1, 1)
-        processed_button = QPushButton("찾기")
-        processed_button.clicked.connect(self.choose_processed_folder)
-        watch_layout.addWidget(processed_button, 1, 2)
         self.watch_button = QPushButton("감시 시작")
         self.watch_button.clicked.connect(self.toggle_watch)
-        watch_layout.addWidget(self.watch_button, 0, 3)
-        watch_layout.addWidget(self.watch_status_label, 1, 3)
-        watch_layout.setColumnStretch(1, 1)
-        root.addWidget(watch_bar)
+        self.statusBar().addPermanentWidget(self.watch_status_label)
+        self.statusBar().addPermanentWidget(self.watch_button)
 
+        zip_panel = self._panel("ZIP 추가 대상", self.preview_table, ("종류", "ZIP 내부 경로", "추가될 위치"))
         stats = QHBoxLayout()
-        stats.setSpacing(10)
+        stats.setSpacing(8)
         for key, label in (("symbol", "심볼"), ("footprint", "풋프린트"), ("3d_model", "3D 모델")):
-            card = QFrame()
-            card.setObjectName("panel")
-            layout = QVBoxLayout(card)
-            layout.setContentsMargins(14, 10, 14, 10)
             label_widget = QLabel(label)
             label_widget.setObjectName("muted")
             value_widget = QLabel("0")
-            value_widget.setObjectName("title")
-            layout.addWidget(label_widget)
-            layout.addWidget(value_widget)
-            stats.addWidget(card)
+            stats.addWidget(label_widget)
+            stats.addWidget(value_widget)
+            stats.addStretch()
             self.summary_labels[key] = value_widget
-        root.addLayout(stats)
+        zip_panel.layout().insertLayout(1, stats)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._panel("미리보기", self.preview_table, ("종류", "ZIP 내부 경로", "추가될 위치")))
-        library_detail_splitter = QSplitter(Qt.Vertical)
-        library_detail_splitter.addWidget(self._panel("라이브러리 연결 상태", self.library_table, ("심볼", "Value", "Footprint", "FP", "3D")))
-        library_detail_splitter.addWidget(self._detail_panel())
-        library_detail_splitter.setSizes([380, 260])
-        splitter.addWidget(library_detail_splitter)
-        splitter.setSizes([520, 620])
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self._panel("라이브러리 연결 상태", self.library_table, ("심볼", "Value", "Footprint", "FP", "3D")))
+        self.work_tabs = QTabWidget()
+        self.work_tabs.addTab(self._detail_panel(), "파트 상세")
+        self.work_tabs.addTab(zip_panel, "ZIP 작업")
+        splitter.addWidget(self.work_tabs)
+        splitter.setSizes([410, 510])
         root.addWidget(splitter, 1)
 
         self.setCentralWidget(central)
@@ -321,7 +292,8 @@ class KicadPartsCollectorQtApp(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
         heading = QLabel(title)
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
@@ -330,8 +302,14 @@ class KicadPartsCollectorQtApp(QMainWindow):
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(22)
         table.horizontalHeader().setStretchLastSection(True)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        if table is self.library_table:
+            table.horizontalHeader().setStretchLastSection(False)
+            for column in (3, 4):
+                table.horizontalHeader().setSectionResizeMode(column, QHeaderView.Fixed)
+                table.setColumnWidth(column, 36)
         layout.addWidget(table)
         return panel
 
@@ -339,15 +317,16 @@ class KicadPartsCollectorQtApp(QMainWindow):
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         heading_row = QHBoxLayout()
-        title = QLabel("선택 파츠 상세")
-        title.setObjectName("sectionTitle")
         self.selected_symbol_label.setObjectName("muted")
-        heading_row.addWidget(title)
-        heading_row.addStretch(1)
-        heading_row.addWidget(self.selected_symbol_label)
+        self.selected_symbol_label.setWordWrap(True)
+        heading_row.addWidget(self.selected_symbol_label, 1)
+        preview_button = QPushButton("파트 미리보기")
+        preview_button.clicked.connect(self.preview_selected_part)
+        heading_row.addWidget(preview_button)
         layout.addLayout(heading_row)
 
         model_row = QHBoxLayout()
@@ -358,8 +337,9 @@ class KicadPartsCollectorQtApp(QMainWindow):
         self.property_table.setHorizontalHeaderLabels(("속성", "값"))
         self.property_table.setAlternatingRowColors(True)
         self.property_table.verticalHeader().setVisible(False)
+        self.property_table.verticalHeader().setDefaultSectionSize(22)
         self.property_table.horizontalHeader().setStretchLastSection(True)
-        self.property_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.property_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.property_table, 1)
 
         buttons = QHBoxLayout()
@@ -367,10 +347,10 @@ class KicadPartsCollectorQtApp(QMainWindow):
         add_button.clicked.connect(self.add_property_row)
         remove_button = QPushButton("속성 삭제")
         remove_button.clicked.connect(self.remove_property_row)
-        save_button = QPushButton("상세 저장")
+        save_button = QPushButton("저장")
         save_button.setObjectName("primary")
         save_button.clicked.connect(self.save_selected_entry)
-        delete_button = QPushButton("선택 파츠 삭제")
+        delete_button = QPushButton("파트 삭제")
         delete_button.setObjectName("danger")
         delete_button.clicked.connect(self.delete_selected_entry)
         buttons.addWidget(add_button)
@@ -506,8 +486,18 @@ class KicadPartsCollectorQtApp(QMainWindow):
             if not entry.footprint_ok or not entry.model_ok:
                 broken += 1
             self._set_table_row(self.library_table, row, (entry.symbol, entry.value, entry.footprint, fp_status, model_status))
-        self.library_table.resizeColumnsToContents()
         self.statusBar().showMessage(f"라이브러리 상태: {len(entries)}개 / 문제 {broken}개")
+
+    def preview_selected_part(self) -> None:
+        entry = self.library_entries.get(self.current_symbol)
+        if entry is None:
+            QMessageBox.information(self, "파트 미리보기", "라이브러리에서 파트를 선택해 주세요.")
+            return
+        from .preview_server import preview_url, release_preview
+        url = preview_url(Path(self.library_edit.text()), entry)
+        dialog = PreviewWindow(url, entry.symbol, self)
+        dialog.finished.connect(lambda: release_preview(url))
+        dialog.show()
 
     def show_selected_entry(self) -> None:
         selected = self.library_table.selectedItems()
@@ -523,6 +513,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         if entry is None:
             return
         self.current_symbol = entry.symbol
+        self.work_tabs.setCurrentIndex(0)
         self.selected_symbol_label.setText(entry.symbol)
         self.model_edit.setText(entry.model)
         self.property_table.setRowCount(0)
@@ -727,6 +718,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         return zip_path, library_root
 
     def _fill_preview(self, items) -> None:
+        self.work_tabs.setCurrentIndex(1)
         counts = summarize_items(items)
         for key, label in self.summary_labels.items():
             label.setText(str(counts.get(key, 0)))
@@ -735,7 +727,6 @@ class KicadPartsCollectorQtApp(QMainWindow):
         self.preview_table.setRowCount(len(items))
         for row, item in enumerate(items):
             self._set_table_row(self.preview_table, row, (self._kind_label(item.kind), item.source, str(item.destination)))
-        self.preview_table.resizeColumnsToContents()
 
     def _save_settings(self) -> None:
         save_settings(

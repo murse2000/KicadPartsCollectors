@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>파트 미리보기</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box;letter-spacing:0}body{margin:0;font:14px system-ui,sans-serif;color:#26343b;background:#f6f7f8;height:100dvh;display:flex;flex-direction:column}
+header{padding:6px 10px;border-bottom:1px solid #d8dde2;background:#fff;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h1{font-size:14px;margin:0;overflow-wrap:anywhere}#footprint{color:#65727d;font-size:11px;overflow-wrap:anywhere}
+nav{display:flex;gap:3px;margin-left:auto}button,select{font:inherit;border:1px solid #cdd4da;background:#fff;border-radius:4px;padding:4px 8px;color:inherit;cursor:pointer}button[aria-selected=true]{background:#e4f2ed;border-color:#3a8b70;color:#14624a}
+#tools{display:flex;align-items:center;gap:4px;padding:4px 10px;border-bottom:1px solid #d8dde2}#pages{max-width:65%;min-width:0}button.icon{width:28px;height:28px;padding:4px;display:grid;place-items:center}.icon svg{width:16px;height:16px}
+main{position:relative;flex:1;min-height:0;overflow:hidden;background:#fff}#scene{position:absolute;inset:0}canvas{display:block;touch-action:none}#image{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:24px;transform-origin:center;user-select:none;touch-action:none;cursor:grab}#image:active{cursor:grabbing}[hidden]{display:none!important}
+footer{padding:3px 10px;border-top:1px solid #d8dde2;font-size:11px;min-height:22px;overflow-wrap:anywhere}footer.error{color:#b33434}button:focus-visible,select:focus-visible{outline:2px solid #238568;outline-offset:2px}
+@media(max-width:560px){nav{margin-left:0;width:100%}nav button{flex:1}}
+</style>
+<header><div><h1 id="name">파트 미리보기</h1><div id="footprint"></div></div><nav role="tablist" aria-label="미리보기 종류"><button role="tab" data-kind="symbol" aria-selected="true">심볼</button><button role="tab" data-kind="footprint" aria-selected="false">풋프린트</button><button role="tab" data-kind="model" aria-selected="false">3D 모델</button></nav></header>
+<div id="tools"><select id="pages" aria-label="심볼 유닛"></select><button class="icon" id="fit" title="화면에 맞춤" aria-label="화면에 맞춤"></button><button class="icon" id="zoomIn" title="확대" aria-label="확대"></button><button class="icon" id="zoomOut" title="축소" aria-label="축소"></button></div>
+<main><img id="image" alt="선택 파트 미리보기" hidden draggable="false"><div id="scene" hidden></div></main>
+<footer id="status" role="status">미리보기 생성 중...</footer>
+<script src="viewer.js"></script>
+</html>

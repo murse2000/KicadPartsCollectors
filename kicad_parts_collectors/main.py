@@ -1,6 +1,8 @@
 import sys
 
-if sys.platform == "darwin":
+if "--part-preview" in sys.argv:
+    from .preview_window import main
+elif sys.platform == "darwin":
     from .qt_app import main
 else:
     from .app import main

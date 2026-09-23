@@ -89,6 +89,43 @@ def _write_text_lf(path: Path, text: str) -> None:
         file.write(text)
 
 
+COMMON_PROPERTY_ORDER = (
+    "Reference",
+    "Value",
+    "Footprint",
+    "Datasheet",
+    "Description",
+    "Manufacturer",
+    "MPN",
+    "LCSC",
+    "Mouser Part Number",
+    "Mouser URL",
+    "Package",
+    "Height",
+    "Source",
+    "Source URL",
+)
+
+_PROPERTY_ALIASES = {
+    "Datasheet": ("DataSheet", "Data Sheet", "DATASHEET"),
+    "Description": ("Description_1", "ki_description"),
+    "Manufacturer": ("Manufacturer_Name", "MANUFACTURER", "MF"),
+    "MPN": (
+        "Mpn",
+        "Manufacturer Part Number",
+        "Manufacturer_Part_Number",
+        "ManufacturerPartNumber",
+        "Part Number",
+        "PartNumber",
+        "MP",
+    ),
+    "LCSC": ("LCSC Part",),
+    "Mouser URL": ("Mouser Price/Stock",),
+    "Height": ("MAXIMUM_PACKAGE_HEIGHT",),
+    "Source URL": ("SnapEDA_Link", "Check_prices", "Purchase-URL"),
+}
+
+
 def build_install_plan(zip_path: Path, library_root: Path) -> list[InstallItem]:
     zip_path = Path(zip_path)
     library_root = Path(library_root)
@@ -210,6 +247,7 @@ def import_easyeda_component(lcsc_id: str, library_root: Path) -> list[InstallIt
         footprint_lib_name=footprint_library.stem,
         overwrite=False,
     )
+    _normalize_symbol_library_file(symbol_library, {easyeda_symbol.info.name})
 
     model_items: list[InstallItem] = []
     model_exporter = Exporter3dModelKicad(
@@ -422,6 +460,26 @@ def fill_missing_lcsc_properties(
     if result.added or result.filled:
         _write_text_lf(symbol_library, updated_text)
     return result
+
+
+def normalize_library_properties(library_root: Path) -> int:
+    library_root = Path(library_root)
+    symbol_library = _symbol_library_for(library_root)
+    text = symbol_library.read_text(encoding="utf-8-sig")
+    updated_text = text
+    changed = 0
+
+    for block in _symbol_blocks(text):
+        updated_block = _normalize_symbol_block_properties(block)
+        if updated_block == block:
+            continue
+        updated_text = updated_text.replace(block, updated_block, 1)
+        changed += 1
+
+    if changed:
+        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+
+    return changed
 
 
 def update_library_entry(
@@ -838,6 +896,7 @@ def _ensure_new_symbols(source_bytes: bytes, destination: Path) -> None:
 def _merge_symbol_file(source_bytes: bytes, destination: Path, footprint_references: dict[str, str], fill_lcsc: bool = False) -> None:
     source_text = _link_symbol_footprints(_decode_kicad_text(source_bytes), footprint_references)
     source_text, _result = _fill_lcsc_properties(source_text) if fill_lcsc else _add_lcsc_properties(source_text)
+    source_text = _normalize_symbol_properties(source_text)
     destination_text = destination.read_text(encoding="utf-8-sig")
     symbol_blocks = _symbol_blocks(source_text)
     if not symbol_blocks:
@@ -1094,6 +1153,57 @@ def _ensure_symbol_property(text: str, property_name: str, value: str) -> tuple[
 def _add_lcsc_properties(text: str) -> tuple[str, LcscUpdateResult]:
     updated_text, count = _ensure_symbol_property(text, "LCSC", "")
     return updated_text, LcscUpdateResult(added=count, filled=0)
+
+
+def _normalize_symbol_library_file(symbol_library: Path, symbols: set[str]) -> None:
+    text = symbol_library.read_text(encoding="utf-8-sig")
+    updated_text = _normalize_symbol_properties(text, symbols)
+    if updated_text != text:
+        symbol_library.write_text(updated_text, encoding="utf-8", newline="\n")
+
+
+def _normalize_symbol_properties(text: str, symbols: set[str] | None = None) -> str:
+    updated_text = text
+    for block in _symbol_blocks(text):
+        if symbols is not None and _symbol_name(block) not in symbols:
+            continue
+        updated_block = _normalize_symbol_block_properties(block)
+        updated_text = updated_text.replace(block, updated_block, 1)
+    return updated_text
+
+
+def _normalize_symbol_block_properties(block: str) -> str:
+    properties = _property_values(block)
+    updated_block = block
+
+    for name in ("Datasheet", "Description", "LCSC"):
+        if name not in properties:
+            updated_block = _upsert_property_value(updated_block, name, "")
+            properties[name] = ""
+
+    for canonical, aliases in _PROPERTY_ALIASES.items():
+        if properties.get(canonical):
+            continue
+        alias_value = _first_property_value(properties, aliases)
+        if alias_value:
+            updated_block = _upsert_property_value(updated_block, canonical, alias_value)
+            properties[canonical] = alias_value
+
+    if not properties.get("Datasheet"):
+        lcsc = properties.get("LCSC") or properties.get("LCSC Part") or ""
+        if re.fullmatch(r"C\d+", lcsc.strip(), re.IGNORECASE):
+            datasheet = f"https://www.lcsc.com/datasheet/{lcsc.strip().upper()}.pdf"
+            updated_block = _upsert_property_value(updated_block, "Datasheet", datasheet)
+
+    return updated_block
+
+
+def _first_property_value(properties: dict[str, str], names: tuple[str, ...]) -> str:
+    for name in names:
+        value = properties.get(name, "").strip()
+        if value and value.lower() != "none":
+            return value
+    return ""
 
 
 def _fill_lcsc_properties(

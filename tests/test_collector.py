@@ -12,6 +12,7 @@ from kicad_parts_collectors.collector import (
     build_install_plan,
     install_zip,
     install_zip_directory,
+    normalize_library_properties,
     process_watch_folder,
     remove_library_entries,
     scan_library,
@@ -93,6 +94,8 @@ class CollectorTests(unittest.TestCase):
             self.assertIn('(symbol "Vendor"', merged_symbol)
             self.assertIn('(property "Footprint" "hrobotics_decal_library:Vendor"', merged_symbol)
             self.assertIn('(property "LCSC" ""', merged_symbol)
+            self.assertIn('(property "Datasheet" ""', merged_symbol)
+            self.assertIn('(property "Description" ""', merged_symbol)
             footprint = (footprint_library / "Vendor.kicad_mod").read_text()
             self.assertIn('(footprint "Vendor"', footprint)
             self.assertIn(f'(model "{(library_root / "3dmodels" / "Vendor.step").resolve().as_posix()}"', footprint)
@@ -142,6 +145,43 @@ class CollectorTests(unittest.TestCase):
             self.assertTrue(footprint_library.is_dir())
             self.assertIn('(symbol "NewLibraryPart"', symbol_library.read_text())
 
+    def test_install_zip_normalizes_common_properties_from_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zip_path = root / "VendorPart.zip"
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            footprint_library = library_root / "hrobotics.pretty"
+            symbol_library.write_text('(kicad_symbol_lib (version 20211014) (generator test)\n)\n')
+            footprint_library.mkdir()
+            source_symbol = (
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "AliasPart" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "AliasPart" (at 0 0 0))\n'
+                '    (property "Footprint" "AliasPart" (at 0 0 0))\n'
+                '    (property "Manufacturer_Name" "Analog Devices" (at 0 0 0))\n'
+                '    (property "Manufacturer_Part_Number" "ADM3055EBRIZ-RL" (at 0 0 0))\n'
+                '    (property "LCSC Part" "C658105" (at 0 0 0))\n'
+                '    (property "Mouser Price/Stock" "https://example.com/mouser" (at 0 0 0))\n'
+                '  )\n'
+                ')\n'
+            )
+
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("AliasPart.kicad_sym", source_symbol)
+                archive.writestr("AliasPart.kicad_mod", footprint_text("AliasPart.step"))
+
+            install_zip(zip_path, library_root)
+
+            merged_symbol = symbol_library.read_text()
+            self.assertIn('(property "Manufacturer" "Analog Devices"', merged_symbol)
+            self.assertIn('(property "MPN" "ADM3055EBRIZ-RL"', merged_symbol)
+            self.assertIn('(property "LCSC" "C658105"', merged_symbol)
+            self.assertIn('(property "Mouser URL" "https://example.com/mouser"', merged_symbol)
+            self.assertIn('(property "Datasheet" "https://www.lcsc.com/datasheet/C658105.pdf"', merged_symbol)
+            self.assertIn('(property "Manufacturer_Name" "Analog Devices"', merged_symbol)
+
     def test_add_missing_lcsc_properties_updates_existing_symbols(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -166,6 +206,39 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(1, count)
             self.assertIn('(property "LCSC" ""', updated)
             self.assertEqual(1, updated.count('(property "LCSC" "C123"'))
+
+    def test_normalize_library_properties_updates_existing_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            library_root = root / "library"
+            library_root.mkdir()
+            symbol_library = library_root / "hrobotics_symbol_library.kicad_sym"
+            symbol_library.write_text(
+                '(kicad_symbol_lib (version 20211014) (generator test)\n'
+                '  (symbol "AliasExisting" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "AliasExisting" (at 0 0 0))\n'
+                '    (property "Manufacturer_Name" "Texas Instruments" (at 0 0 0))\n'
+                '    (property "Manufacturer_Part_Number" "TPD4E1U06DBVR" (at 0 0 0))\n'
+                '    (property "LCSC Part" "C124691" (at 0 0 0))\n'
+                '  )\n'
+                '  (symbol "AlreadyClean" (in_bom yes) (on_board yes)\n'
+                '    (property "Value" "AlreadyClean" (at 0 0 0))\n'
+                '    (property "Datasheet" "https://example.com/ds.pdf" (at 0 0 0))\n'
+                '    (property "Description" "clean" (at 0 0 0))\n'
+                '    (property "LCSC" "C1" (at 0 0 0))\n'
+                '  )\n'
+                ')\n'
+            )
+
+            changed = normalize_library_properties(library_root)
+
+            updated = symbol_library.read_text()
+            self.assertEqual(1, changed)
+            self.assertIn('(property "Manufacturer" "Texas Instruments"', updated)
+            self.assertIn('(property "MPN" "TPD4E1U06DBVR"', updated)
+            self.assertIn('(property "LCSC" "C124691"', updated)
+            self.assertIn('(property "Datasheet" "https://www.lcsc.com/datasheet/C124691.pdf"', updated)
+            self.assertIn('(property "Manufacturer_Name" "Texas Instruments"', updated)
 
     def test_fill_missing_lcsc_properties_uses_exact_match_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
