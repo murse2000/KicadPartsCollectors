@@ -11,7 +11,7 @@ class PreviewTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.library = self.root / "parts.pretty"
         self.library.mkdir()
         self.footprint = self.library / "Part.kicad_mod"
