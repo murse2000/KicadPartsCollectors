@@ -1,0 +1,19 @@
+--- a/src/plugins/platforms/cocoa/qcocoaaccessibilityelement.mm
++++ b/src/plugins/platforms/cocoa/qcocoaaccessibilityelement.mm
+@@ -202,6 +202,6 @@
+     for (uint i = 0; i < array.count; ++i) {
+         QMacAccessibilityElement *cell = [array objectAtIndex:i];
+-        if (cell->axid) { // it's a proper cell, remove from cache
++        if (cell->axid && !cell.isManagedByParent) { // 실제 셀만 캐시에서 제거한다.
+             QAccessibleCache::instance()->deleteInterface(cell->axid);
+         }
+     }
+@@ -243,5 +243,7 @@
+         [columns release]; // will also release all entries first
+     }
+-    QAccessibleCache::instance()->deleteInterface(axid);
++    // 합성 요소의 ID는 부모 소유이므로 부모 인터페이스를 삭제하지 않는다.
++    if (!self.isManagedByParent)
++        QAccessibleCache::instance()->deleteInterface(axid);
+     [super dealloc];
+ }

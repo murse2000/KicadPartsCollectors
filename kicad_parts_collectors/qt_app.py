@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -34,6 +35,7 @@ from .collector import (
     build_install_plan,
     ensure_watch_folders,
     import_easyeda_query,
+    import_easyeda_component,
     install_zip,
     install_zip_directory,
     process_watch_folder,
@@ -44,6 +46,7 @@ from .collector import (
 )
 from .settings import AppSettings, load_settings, save_settings
 from .preview_window import PreviewWindow
+from .parts_search import PAGE_SIZE, search_parts
 from .updater import UpdateError, download_release_asset, fetch_latest_release, install_downloaded_update, is_newer_version
 from .version import APP_VERSION
 
@@ -139,6 +142,8 @@ class KicadPartsCollectorQtApp(QMainWindow):
     update_error = Signal(str)
     update_release_ready = Signal(object)
     update_download_ready = Signal(Path)
+    parts_search_ready = Signal(object)
+    parts_download_ready = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -178,6 +183,13 @@ class KicadPartsCollectorQtApp(QMainWindow):
         self.update_error.connect(lambda message: self._error("업데이트 실패", message))
         self.update_release_ready.connect(self._handle_update_release)
         self.update_download_ready.connect(self._install_update)
+        self.parts_search_ready.connect(self._finish_parts_search)
+        self.parts_download_ready.connect(self._finish_parts_download)
+        self.parts_download_busy = False
+        self.parts_search_page = 1
+        self.parts_search_total = 0
+        self.parts_search_query = ""
+        self.parts_search_busy = False
 
         self._build_menu()
         self._build_ui()
@@ -281,6 +293,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         self.work_tabs = QTabWidget()
         self.work_tabs.addTab(self._detail_panel(), "파트 상세")
         self.work_tabs.addTab(zip_panel, "ZIP 작업")
+        self.work_tabs.addTab(self._parts_search_panel(), "부품찾기")
         splitter.addWidget(self.work_tabs)
         splitter.setSizes([410, 510])
         root.addWidget(splitter, 1)
@@ -312,6 +325,209 @@ class KicadPartsCollectorQtApp(QMainWindow):
                 table.setColumnWidth(column, 36)
         layout.addWidget(table)
         return panel
+
+    def _parts_search_panel(self) -> QFrame:
+        self.parts_table = QTableWidget(0, 6)
+        panel = self._panel("JLCPCB 부품 검색", self.parts_table,
+                            ("LCSC", "부품명", "제조사", "패키지", "카테고리", "재고"))
+        self.parts_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        for column, width in enumerate((85, 160, 120, 95, 130, 75)):
+            self.parts_table.setColumnWidth(column, width)
+        self.parts_keyword = QLineEdit()
+        self.parts_keyword.setPlaceholderText("카테고리 · 부품명 · 키워드")
+        self.parts_keyword.setClearButtonEnabled(True)
+        self.parts_keyword.returnPressed.connect(lambda: self._start_parts_search(1))
+        self.parts_search_button = QPushButton("검색")
+        self.parts_search_button.setObjectName("primary")
+        self.parts_search_button.clicked.connect(lambda: self._start_parts_search(1))
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.parts_keyword, 1)
+        search_row.addWidget(self.parts_search_button)
+        panel.layout().insertLayout(1, search_row)
+        self.parts_search_status = QLabel("0개")
+        self.parts_search_status.setWordWrap(True)
+        panel.layout().addWidget(self.parts_search_status)
+        paging = QHBoxLayout()
+        self.parts_previous = QPushButton("이전")
+        self.parts_next = QPushButton("다음")
+        self.parts_previous.setEnabled(False)
+        self.parts_next.setEnabled(False)
+        self.parts_previous.clicked.connect(lambda: self._start_parts_search(self.parts_search_page - 1))
+        self.parts_next.clicked.connect(lambda: self._start_parts_search(self.parts_search_page + 1))
+        self.parts_download_button = QPushButton("다운로드")
+        self.parts_download_button.setToolTip("선택한 부품을 라이브러리에 추가")
+        self.parts_download_button.setEnabled(False)
+        self.parts_download_button.clicked.connect(self._download_selected_part)
+        self.parts_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.parts_table.itemSelectionChanged.connect(
+            lambda: self.parts_download_button.setEnabled(
+                bool(self.parts_table.selectedItems()) and not self.parts_download_busy))
+        self.parts_table.cellDoubleClicked.connect(self._show_part_specs)
+        paging.addWidget(self.parts_download_button)
+        paging.addStretch()
+        paging.addWidget(self.parts_previous)
+        paging.addWidget(self.parts_next)
+        panel.layout().addLayout(paging)
+        return panel
+
+    def _start_parts_search(self, page: int) -> None:
+        if self.parts_search_busy or self.parts_download_busy:
+            return
+        query = self.parts_keyword.text().strip() if page == 1 else self.parts_search_query
+        if not query:
+            self.parts_search_status.setText("검색어를 입력하세요.")
+            self.parts_keyword.setFocus()
+            return
+        self.parts_search_busy = True
+        self.parts_keyword.setEnabled(False)
+        self.parts_search_button.setEnabled(False)
+        self.parts_previous.setEnabled(False)
+        self.parts_next.setEnabled(False)
+        self.parts_table.setRowCount(0)
+        self.parts_search_status.setText(f"검색 중: {query}")
+        threading.Thread(target=self._parts_search_job, args=(query, page), daemon=True).start()
+
+    def _parts_search_job(self, query: str, page: int) -> None:
+        try:
+            result = search_parts(query, page)
+            self.parts_search_ready.emit((query, page, result, ""))
+        except Exception as exc:
+            self.parts_search_ready.emit((query, page, None, str(exc)))
+
+    def _finish_parts_search(self, response) -> None:
+        query, page, result, error = response
+        self.parts_search_busy = False
+        self.parts_keyword.setEnabled(True)
+        self.parts_search_button.setEnabled(True)
+        if error:
+            self.parts_search_status.setText(f"검색 실패: {error}")
+            return
+        self.parts_search_query = query
+        self.parts_search_page = page
+        self.parts_search_total = result["total"]
+        rows = result["results"]
+        self.parts_table.setRowCount(len(rows))
+        fields = ("componentCode", "componentModelEn", "componentBrandEn",
+                  "componentSpecificationEn", "componentTypeEn", "stockCount")
+        for row, part in enumerate(rows):
+            for column, field in enumerate(fields):
+                value = part.get(field)
+                item = QTableWidgetItem(str(value) if value is not None else "—")
+                item.setToolTip(str(part.get("describe") or item.text()))
+                if column == 0:
+                    item.setData(Qt.UserRole, part)
+                self.parts_table.setItem(row, column, item)
+        pages = max(1, (self.parts_search_total + PAGE_SIZE - 1) // PAGE_SIZE)
+        self.parts_search_status.setText(
+            f"{query} · {self.parts_search_total:,}개 · {page}/{pages} 페이지"
+            if rows else f"검색 결과 없음: {query}")
+        self.parts_previous.setEnabled(page > 1)
+        self.parts_next.setEnabled(bool(rows) and page < pages)
+
+    def _show_part_specs(self, row: int, column: int) -> None:
+        if self.parts_download_busy or self.parts_search_busy:
+            return
+        item = self.parts_table.item(row, 0)
+        part = item.data(Qt.UserRole) if item is not None else None
+        if not part:
+            return
+        dialog = QDialog(self)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.setWindowTitle(f"부품 상세 스펙 · {part.get('componentModelEn') or item.text()}")
+        dialog.resize(620, 520)
+        dialog.setMinimumSize(400, 300)
+        layout = QVBoxLayout(dialog)
+        fields = (("LCSC", "componentCode"), ("부품명", "componentModelEn"),
+                  ("제조사", "componentBrandEn"), ("패키지", "componentSpecificationEn"),
+                  ("카테고리", "componentTypeEn"), ("재고", "stockCount"),
+                  ("설명", "describe"), ("데이터시트", "dataManualUrl"))
+        specs = [(label, str(part[key])) for label, key in fields
+                 if part.get(key) is not None and part.get(key) != ""]
+        attributes = [(str(attribute.get("attribute_name_en") or "사양"),
+                       str(attribute["attribute_value_name"]))
+                      for attribute in (part.get("attributes") or [])
+                      if attribute.get("attribute_value_name") not in (None, "", "-")]
+        specs.extend(attributes or [("상세 사양", "제공된 상세 사양 없음")])
+        table = QTableWidget(len(specs), 2, dialog)
+        table.setObjectName("partsSpecTable")
+        table.setHorizontalHeaderLabels(("항목", "값"))
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        for index, (name, value) in enumerate(specs):
+            table.setItem(index, 0, QTableWidgetItem(name))
+            cell = QTableWidgetItem(value)
+            cell.setToolTip(value)
+            table.setItem(index, 1, cell)
+        table.horizontalHeader().sectionResized.connect(lambda: table.resizeRowsToContents())
+        layout.addWidget(table)
+        close_button = QPushButton("닫기")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button, alignment=Qt.AlignRight)
+        dialog.open()
+        table.resizeRowsToContents()
+
+    def _download_selected_part(self) -> None:
+        if self.parts_download_busy or self.parts_search_busy:
+            return
+        row = self.parts_table.currentRow()
+        code = self.parts_table.item(row, 0)
+        if not self.parts_table.selectedItems() or code is None:
+            self.parts_search_status.setText("다운로드할 부품을 선택하세요.")
+            return
+        root_text = self.library_edit.text().strip()
+        library_root = Path(root_text)
+        if not root_text or not library_root.is_dir():
+            self._error("확인 필요", "먼저 라이브러리 폴더를 선택하세요.")
+            return
+        lcsc_id = code.text().strip()
+        self.parts_download_busy = True
+        # 가져오기 중 감시·수정 작업이 같은 라이브러리 파일에 동시에 쓰지 않도록 한다.
+        self.watch_timer.stop()
+        self.centralWidget().setEnabled(False)
+        self.menuBar().setEnabled(False)
+        self.watch_button.setEnabled(False)
+        self.parts_search_status.setText(f"다운로드 및 라이브러리 추가 중: {lcsc_id}")
+        threading.Thread(target=self._parts_download_job,
+                         args=(lcsc_id, library_root), daemon=True).start()
+
+    def _parts_download_job(self, lcsc_id: str, library_root: Path) -> None:
+        try:
+            items = import_easyeda_component(lcsc_id, library_root)
+            self.parts_download_ready.emit((lcsc_id, items, ""))
+        except Exception as exc:
+            self.parts_download_ready.emit((lcsc_id, [], str(exc)))
+
+    def _finish_parts_download(self, response) -> None:
+        lcsc_id, items, error = response
+        self.parts_download_busy = False
+        self.centralWidget().setEnabled(True)
+        self.menuBar().setEnabled(True)
+        self.watch_button.setEnabled(True)
+        if self.watch_enabled:
+            self.watch_timer.start()
+        self.refresh_library()
+        if error:
+            self.parts_search_status.setText(f"가져오기 실패: {lcsc_id} · {error}")
+            self._error("부품 다운로드 실패", error)
+            return
+        self._fill_preview(items)
+        self.work_tabs.setCurrentIndex(2)
+        counts = summarize_items(items)
+        models = counts.get("3d_model", 0)
+        model_status = f"3D 모델 {models}개" if models else "새 3D 모델 없음 (미제공 또는 기존 파일)"
+        message = f"{lcsc_id} · 심볼·풋프린트 추가/확인 완료 · {model_status}"
+        self.parts_search_status.setText(message)
+        self.statusBar().showMessage(message)
+
+    def closeEvent(self, event) -> None:
+        if self.parts_download_busy:
+            self.statusBar().showMessage("부품 다운로드가 완료된 후 종료할 수 있습니다.")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _detail_panel(self) -> QFrame:
         panel = QFrame()

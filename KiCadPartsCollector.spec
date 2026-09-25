@@ -47,6 +47,13 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+if sys.platform == 'darwin':
+    # 부모 표의 접근성 객체를 삭제하지 않도록 수정한 Cocoa 플러그인을 포함한다.
+    cocoa_plugin = Path('build/qt-cocoa/plugins/platforms/libqcocoa.dylib').resolve()
+    if not cocoa_plugin.is_file():
+        raise RuntimeError('먼저 scripts/build-qt-cocoa.sh를 실행하세요.')
+    a.binaries = [(name, str(cocoa_plugin) if name.endswith('/platforms/libqcocoa.dylib') else source, kind)
+                  for name, source, kind in a.binaries]
 pyz = PYZ(a.pure)
 
 if sys.platform == 'darwin':

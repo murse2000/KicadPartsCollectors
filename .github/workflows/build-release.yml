@@ -51,7 +51,15 @@ jobs:
         run: python -m unittest discover -s tests
 
       - name: Build app
+        if: runner.os != 'macOS'
         run: python -m PyInstaller --clean -y KiCadPartsCollector.spec
+
+      - name: Build macOS app with corrected Qt accessibility ownership
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install aqtinstall cmake ninja
+          bash scripts/build-qt-cocoa.sh "$(which python)"
+          python -m PyInstaller --clean -y KiCadPartsCollector.spec
 
       - name: Package macOS app
         if: runner.os == 'macOS'
