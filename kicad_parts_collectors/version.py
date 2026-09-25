@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 
 
-APP_VERSION = "1.0.12"
+APP_VERSION = "1.0.13"
 GITHUB_OWNER = "murse2000"
 GITHUB_REPO = "KicadPartsCollectors"
 

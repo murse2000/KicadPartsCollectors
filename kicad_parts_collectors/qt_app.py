@@ -300,6 +300,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
 
         self.setCentralWidget(central)
         self.library_table.itemSelectionChanged.connect(self.show_selected_entry)
+        self.library_table.cellDoubleClicked.connect(self._show_library_part_specs)
 
     def _panel(self, title: str, table: QTableWidget, headers: tuple[str, ...]) -> QFrame:
         panel = QFrame()
@@ -431,12 +432,6 @@ class KicadPartsCollectorQtApp(QMainWindow):
         part = item.data(Qt.UserRole) if item is not None else None
         if not part:
             return
-        dialog = QDialog(self)
-        dialog.setAttribute(Qt.WA_DeleteOnClose)
-        dialog.setWindowTitle(f"부품 상세 스펙 · {part.get('componentModelEn') or item.text()}")
-        dialog.resize(620, 520)
-        dialog.setMinimumSize(400, 300)
-        layout = QVBoxLayout(dialog)
         fields = (("LCSC", "componentCode"), ("부품명", "componentModelEn"),
                   ("제조사", "componentBrandEn"), ("패키지", "componentSpecificationEn"),
                   ("카테고리", "componentTypeEn"), ("재고", "stockCount"),
@@ -448,6 +443,29 @@ class KicadPartsCollectorQtApp(QMainWindow):
                       for attribute in (part.get("attributes") or [])
                       if attribute.get("attribute_value_name") not in (None, "", "-")]
         specs.extend(attributes or [("상세 사양", "제공된 상세 사양 없음")])
+        self._open_part_specs(part.get("componentModelEn") or item.text(), specs)
+
+    def _show_library_part_specs(self, row: int, column: int) -> None:
+        if column != 0 or self.parts_download_busy:
+            return
+        item = self.library_table.item(row, 0)
+        entry = self.library_entries.get(item.text()) if item is not None else None
+        if entry is None:
+            return
+        specs = [("심볼", entry.symbol), ("부품명", entry.value),
+                 ("풋프린트", entry.footprint), ("3D 모델", entry.model),
+                 ("데이터시트", entry.datasheet), ("설명", entry.description)]
+        specs = [(name, value) for name, value in specs if value]
+        specs.extend((name, value) for name, value in entry.properties.items() if value)
+        self._open_part_specs(entry.symbol, specs)
+
+    def _open_part_specs(self, title: str, specs: list[tuple[str, str]]) -> None:
+        dialog = QDialog(self)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.setWindowTitle(f"부품 상세 스펙 · {title}")
+        dialog.resize(620, 520)
+        dialog.setMinimumSize(400, 300)
+        layout = QVBoxLayout(dialog)
         table = QTableWidget(len(specs), 2, dialog)
         table.setObjectName("partsSpecTable")
         table.setHorizontalHeaderLabels(("항목", "값"))

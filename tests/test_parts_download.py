@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTableWidgetItem, QDialog, QTableWidget
-from kicad_parts_collectors.collector import InstallItem, WatchFolders
+from kicad_parts_collectors.collector import InstallItem, WatchFolders, LibraryEntry
 from kicad_parts_collectors.qt_app import KicadPartsCollectorQtApp
 from kicad_parts_collectors.settings import AppSettings
 
@@ -63,6 +63,30 @@ class PartsDownloadTests(unittest.TestCase):
         dialog = self.window.findChild(QDialog)
         table = dialog.findChild(QTableWidget, "partsSpecTable")
         self.assertEqual(table.item(table.rowCount() - 1, 1).text(), "제공된 상세 사양 없음")
+        dialog.accept()
+
+    @patch("kicad_parts_collectors.qt_app.threading.Thread")
+    def test_library_symbol_double_click_shows_saved_properties(self, thread):
+        entry = LibraryEntry("SS14", "SS14", "parts:SS14", "https://example.com/datasheet",
+                             "Schottky diode", {"Manufacturer_Name": "Taiwan Semiconductor",
+                             "Voltage": "40V"}, True, "SS14.step", True)
+        self.window.library_entries = {entry.symbol: entry}
+        self.window.library_table.setRowCount(1)
+        self.window.library_table.setItem(0, 0, QTableWidgetItem(entry.symbol))
+        self.window.library_table.selectRow(0)
+        self.assertEqual(self.window.current_symbol, "SS14")
+        self.window.library_table.cellDoubleClicked.emit(0, 1)
+        self.assertIsNone(self.window.findChild(QDialog))
+        self.window.library_table.cellDoubleClicked.emit(0, 0)
+        dialog = self.window.findChild(QDialog)
+        table = dialog.findChild(QTableWidget, "partsSpecTable")
+        specs = {table.item(row, 0).text(): table.item(row, 1).text()
+                 for row in range(table.rowCount())}
+        self.assertEqual(specs["Voltage"], "40V")
+        self.assertEqual(specs["Manufacturer_Name"], "Taiwan Semiconductor")
+        self.assertEqual(specs["3D 모델"], "SS14.step")
+        thread.assert_not_called()
+        self.assertEqual(entry.properties["Voltage"], "40V")
         dialog.accept()
 
     @patch("kicad_parts_collectors.qt_app.threading.Thread")
