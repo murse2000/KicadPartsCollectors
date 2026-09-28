@@ -1,13 +1,24 @@
 import tempfile
+import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from kicad_parts_collectors.collector import CollectorError, LibraryEntry
-from kicad_parts_collectors.preview import _preview_board, render_preview
+from kicad_parts_collectors.preview import _preview_board, render_preview, _run
 
 
 class PreviewTests(unittest.TestCase):
+    def test_windows_does_not_pass_updater_appdir_to_kicad(self):
+        with patch.dict(os.environ, {"APPDIR": "C:/parts/dist", "KICAD10_3DMODEL_DIR": "C:/models"}), \
+             patch("kicad_parts_collectors.preview.sys.platform", "win32"), \
+             patch("kicad_parts_collectors.preview.subprocess.CREATE_NO_WINDOW", 0, create=True), \
+             patch("kicad_parts_collectors.preview.subprocess.run", return_value=Mock(returncode=0, stdout="10.0")) as run:
+            self.assertEqual(_run(Path("kicad-cli"), "version"), "10.0")
+            self.assertNotIn("APPDIR", run.call_args.kwargs["env"])
+            self.assertEqual(run.call_args.kwargs["env"]["KICAD10_3DMODEL_DIR"], "C:/models")
+            self.assertEqual(os.environ["APPDIR"], "C:/parts/dist")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

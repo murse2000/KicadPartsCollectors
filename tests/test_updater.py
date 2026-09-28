@@ -4,11 +4,22 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from kicad_parts_collectors.updater import UpdateError, _release_asset, _verify_digest, is_newer_version
+from kicad_parts_collectors.updater import UpdateError, _release_asset, _verify_digest, is_newer_version, install_downloaded_update
 
 
 class UpdaterTests(unittest.TestCase):
+    def test_update_script_does_not_define_kicad_appimage_variable(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("kicad_parts_collectors.updater.tempfile.gettempdir", return_value=temp_dir), \
+             patch("kicad_parts_collectors.updater.sys.platform", "win32"), \
+             patch("kicad_parts_collectors.updater.subprocess.Popen"):
+            install_downloaded_update(Path(temp_dir) / "new.exe", Path(temp_dir) / "app.exe")
+            script = (Path(temp_dir) / "KiCadPartsCollector_update.cmd").read_text(encoding="utf-8")
+            self.assertNotIn("APPDIR", script)
+            self.assertIn('start "" /D "%KPC_UPDATE_DIR%" "%DST%"', script)
+
     def test_version_compare_uses_numeric_parts(self) -> None:
         self.assertTrue(is_newer_version("v1.2.0", "1.1.9"))
         self.assertTrue(is_newer_version("1.0.10", "1.0.2"))

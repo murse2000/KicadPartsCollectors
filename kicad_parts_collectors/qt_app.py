@@ -46,7 +46,7 @@ from .collector import (
 )
 from .settings import AppSettings, load_settings, save_settings
 from .preview_window import PreviewWindow
-from .parts_search import PAGE_SIZE, search_parts
+from .parts_search import PAGE_SIZE, search_parts, library_specs, part_specs
 from .updater import UpdateError, download_release_asset, fetch_latest_release, install_downloaded_update, is_newer_version
 from .version import APP_VERSION
 
@@ -432,18 +432,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         part = item.data(Qt.UserRole) if item is not None else None
         if not part:
             return
-        fields = (("LCSC", "componentCode"), ("부품명", "componentModelEn"),
-                  ("제조사", "componentBrandEn"), ("패키지", "componentSpecificationEn"),
-                  ("카테고리", "componentTypeEn"), ("재고", "stockCount"),
-                  ("설명", "describe"), ("데이터시트", "dataManualUrl"))
-        specs = [(label, str(part[key])) for label, key in fields
-                 if part.get(key) is not None and part.get(key) != ""]
-        attributes = [(str(attribute.get("attribute_name_en") or "사양"),
-                       str(attribute["attribute_value_name"]))
-                      for attribute in (part.get("attributes") or [])
-                      if attribute.get("attribute_value_name") not in (None, "", "-")]
-        specs.extend(attributes or [("상세 사양", "제공된 상세 사양 없음")])
-        self._open_part_specs(part.get("componentModelEn") or item.text(), specs)
+        self._open_part_specs(part.get("componentModelEn") or item.text(), part_specs(part))
 
     def _show_library_part_specs(self, row: int, column: int) -> None:
         if column != 0 or self.parts_download_busy:
@@ -452,12 +441,7 @@ class KicadPartsCollectorQtApp(QMainWindow):
         entry = self.library_entries.get(item.text()) if item is not None else None
         if entry is None:
             return
-        specs = [("심볼", entry.symbol), ("부품명", entry.value),
-                 ("풋프린트", entry.footprint), ("3D 모델", entry.model),
-                 ("데이터시트", entry.datasheet), ("설명", entry.description)]
-        specs = [(name, value) for name, value in specs if value]
-        specs.extend((name, value) for name, value in entry.properties.items() if value)
-        self._open_part_specs(entry.symbol, specs)
+        self._open_part_specs(entry.symbol, library_specs(entry))
 
     def _open_part_specs(self, title: str, specs: list[tuple[str, str]]) -> None:
         dialog = QDialog(self)

@@ -578,6 +578,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         self.library_table.grid(row=1, column=0, sticky="nsew")
         self.library_table.bind("<Configure>", self._schedule_library_column_fit)
         self.library_table.bind("<<TreeviewSelect>>", self._show_selected_library_entry)
+        self.library_table.bind("<Double-1>", self._show_library_part_specs)
         library_scroll = ttk.Scrollbar(library_card, orient=tk.VERTICAL, command=self.library_table.yview)
         library_scroll.grid(row=1, column=1, sticky="ns")
         self.library_table.configure(yscrollcommand=library_scroll.set)
@@ -682,6 +683,10 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         batch_scroll = ttk.Scrollbar(batch_tab, orient=tk.VERTICAL, command=self.batch_table.yview)
         batch_scroll.grid(row=0, column=1, sticky="ns")
         self.batch_table.configure(yscrollcommand=batch_scroll.set)
+
+        from .tk_parts import PartsPanel
+        self.parts_panel = PartsPanel(work_tabs, self._import_search_part)
+        work_tabs.add(self.parts_panel, text="부품찾기")
 
         status_bar = ttk.Frame(root, style="Status.TFrame")
         status_bar.grid(row=2, column=0, sticky="ew", pady=(3, 0))
@@ -1098,6 +1103,20 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         from .preview_server import open_preview
         open_preview(Path(self.library_root.get()), entry, self)
 
+    def _import_search_part(self, code):
+        self.easyeda_query.set(code)
+        self._import_easyeda()
+
+    def _show_library_part_specs(self, event):
+        if self.library_table.identify_column(event.x) != "#1":
+            return
+        row = self.library_table.identify_row(event.y)
+        entry = self.library_entries.get(row)
+        if entry is not None:
+            from .parts_search import library_specs
+            from .tk_parts import show_specs
+            show_specs(self, entry.symbol, library_specs(entry))
+
     def _show_selected_library_entry(self, _event=None) -> None:
         selected = self.library_table.selection()
         if not selected:
@@ -1361,6 +1380,7 @@ class KicadPartsCollectorApp(tb.Window if tb else tk.Tk):
         )
 
     def _set_busy(self, busy: bool) -> None:
+        self.parts_panel.set_busy(busy)
         state = tk.DISABLED if busy else tk.NORMAL
         self.zip_button.configure(state=state)
         self.zip_entry.configure(state=state)

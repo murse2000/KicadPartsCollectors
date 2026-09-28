@@ -9,6 +9,27 @@ from easyeda2kicad.easyeda.easyeda_api import EasyedaApi, JLCPCB_SEARCH_API
 PAGE_SIZE = 20
 
 
+def library_specs(entry) -> list[tuple[str, str]]:
+    specs = [("심볼", entry.symbol), ("부품명", entry.value),
+             ("풋프린트", entry.footprint), ("3D 모델", entry.model),
+             ("데이터시트", entry.datasheet), ("설명", entry.description)]
+    return [(name, value) for name, value in specs if value] + [
+        (name, value) for name, value in entry.properties.items() if value]
+
+
+def part_specs(part: dict) -> list[tuple[str, str]]:
+    fields = (("LCSC", "componentCode"), ("부품명", "componentModelEn"),
+              ("제조사", "componentBrandEn"), ("패키지", "componentSpecificationEn"),
+              ("카테고리", "componentTypeEn"), ("재고", "stockCount"),
+              ("설명", "describe"), ("데이터시트", "dataManualUrl"))
+    specs = [(label, str(part[key])) for label, key in fields
+             if part.get(key) not in (None, "")]
+    attributes = [(str(item.get("attribute_name_en") or "사양"), str(item["attribute_value_name"]))
+                  for item in (part.get("attributes") or [])
+                  if item.get("attribute_value_name") not in (None, "", "-")]
+    return specs + (attributes or [("상세 사양", "제공된 상세 사양 없음")])
+
+
 def search_parts(keyword: str, page: int = 1) -> dict:
     keyword = keyword.strip()
     if not keyword:

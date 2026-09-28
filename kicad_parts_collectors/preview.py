@@ -36,8 +36,13 @@ def find_kicad_cli() -> Path:
 
 
 def _run(cli: Path, *args: str) -> str:
+    environment = os.environ.copy()
+    if sys.platform == "win32":
+        # 이전 업데이트 스크립트의 APPDIR을 KiCad가 AppImage 경로로 오인하지 않게 한다.
+        environment.pop("APPDIR", None)
     try:
         result = subprocess.run([str(cli), *args], capture_output=True, text=True,
+                                env=environment,
                                 encoding="utf-8", errors="replace", timeout=120,
                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     except subprocess.TimeoutExpired as exc:
